@@ -1,0 +1,22 @@
+[package]
+name = "framescope"
+version = "0.1.0"
+edition = "2021"
+description = "Schlanker, portabler Videoplayer für frame-genaue Analyse"
+license = "MIT"
+rust-version = "1.80"
+
+[dependencies]
+anyhow = "1"
+thiserror = "2"
+crossbeam-channel = "0.5"
+eframe = { version = "0.36", default-features = false, features = ["glow", "default_fonts", "x11"] }
+ffmpeg-next = { version = "9", default-features = false, features = ["codec", "format", "software-scaling", "software-resampling"] }
+rfd = "0.17"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
+opt-level = 3
