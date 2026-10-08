@@ -52,5 +52,10 @@ v1: swscale → RGBA, Upload via `TextureHandle::set`. Später (Optimierung): YU
 
 Jeder Meilenstein: `cargo fmt`, `cargo clippy -- -D warnings`, `cargo build --release`, Commit (Conventional Commits).
 
+## Status
+
+M1–M6 sind umgesetzt (siehe `CHANGELOG.md` und Git-Historie). Offene Optimierungen für spätere Versionen:
+YUV-Upload per Shader statt RGBA, D3D11VA-Hardwaredecoding, lückenloser Loop-Sprung über den Frame-Cache.
+
 ## Nicht im Scope (v1)
 Playlists, Untertitel, Streaming, Filter, Installer, Auto-Updater, synchronisierte Wiedergabe zwischen Instanzen.

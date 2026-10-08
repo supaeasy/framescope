@@ -41,7 +41,8 @@ if (Test-Path $zip) { Remove-Item -LiteralPath $zip -Force }
 Compress-Archive -Path (Join-Path $stage "*") -DestinationPath $zip -CompressionLevel Optimal
 
 $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
-"$hash *$name.zip" | Set-Content -Encoding ascii "$zip.sha256"
+# LF-Zeilenende, damit `sha256sum -c` die Datei auch unter Linux/Git-Bash liest.
+[System.IO.File]::WriteAllText((Join-Path (Resolve-Path $OutDir) "$name.zip.sha256"), "$hash *$name.zip`n")
 
 # Smoke-Test: aus dem entpackten ZIP starten, mit minimalem PATH (DLLs muessen daneben liegen).
 $check = Join-Path ([System.IO.Path]::GetTempPath()) "$name-check"
