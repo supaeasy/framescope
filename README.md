@@ -3,9 +3,11 @@
 Schlanker, portabler Videoplayer für Windows 11 mit Fokus auf **frame-genaue Analyse und Vergleich** –
 geschrieben in Rust. Kein Installer, keine Registry-Einträge, keine Daten in `%APPDATA%`: ZIP entpacken und starten.
 
-![Screenshot: Wiedergabe mit Loop-Bereich und Info-Overlay](docs/screenshots/player.png)
+![Screenshot: rahmenloses Fenster mit Loop-Bereich, KEY-Marke und Info-Overlay](docs/screenshots/player.png)
 
 ![Screenshot: A/B-Vergleich mit Schieber](docs/screenshots/compare.png)
+
+*Beide Screenshots zeigen synthetische Testclips; das Fenster hat keine Titelleiste, die Bedienelemente erscheinen bei Mausbewegung.*
 
 ## Features
 
@@ -20,6 +22,10 @@ geschrieben in Rust. Kein Installer, keine Registry-Einträge, keine Daten in `%
 - **Mehrere Instanzen** zum Vergleichen: jedes Fenster ist ein eigener Prozess (`Strg+N`)
 - **A/B-Vergleich** zweier Videos in einem Fenster: Schieber über dem Bild, Nebeneinander, Überblenden
 - **Synchronisierte Wiedergabe** mehrerer Fenster (Play, Pause, Seek, Einzelbild, Loop-Sprünge)
+- **Fenster anordnen**: alle offenen FrameScope-Fenster auf Knopfdruck gleich groß und lückenlos im Raster (2–3 übereinander, 4 im 2×2-Raster, …)
+- **Rahmenloses Fenster** ohne Titelleiste – nur das Bild; Fenstersteuerung, Verschieben (Ziehen im Bild) und Größenänderung am Rand
+- **Immer im Vordergrund** (Pin-Button, `T`) und **Originalgröße** (Button, `1`): Fenster auf die Videoauflösung setzen, 1 Videopixel = 1 Bildschirmpixel
+- **Klick ins Bild** startet/pausiert die Wiedergabe
 - **Portable** und **Dark-UI** („Nocturne“): Controls blenden sich bei Inaktivität aus, Video im Vordergrund
 
 ## Bedienung
