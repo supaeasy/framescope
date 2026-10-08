@@ -10,6 +10,7 @@ Alle nennenswerten Änderungen an FrameScope. Das Format folgt
 - **Immer im Vordergrund** (Pin-Button, `T`).
 - **Fenster anordnen** (Button, `G`): alle FrameScope-Fenster gleich groß, lückenlos im Raster (2–3 übereinander, 4 im 2×2-Raster, …).
 - **Klick ins Bild** startet/pausiert die Wiedergabe.
+- **Originalgröße** (Button, `1`): Fenster auf die Videoauflösung setzen, pixelgenau 1:1.
 
 ## [0.3.0] - 2026-10-08
 

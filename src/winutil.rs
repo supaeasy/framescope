@@ -34,6 +34,37 @@ pub fn cell_rect(
     (left + x0, top + y0, x1 - x0, y1 - y0)
 }
 
+/// Größe `(w, h)` so verkleinert (nie vergrößert), dass sie in `(max_w, max_h)` passt;
+/// das Seitenverhältnis bleibt erhalten.
+pub fn fit_within(w: i32, h: i32, max_w: i32, max_h: i32) -> (i32, i32) {
+    if w <= max_w && h <= max_h {
+        return (w, h);
+    }
+    let scale = (f64::from(max_w) / f64::from(w)).min(f64::from(max_h) / f64::from(h));
+    (
+        ((f64::from(w) * scale).floor() as i32).max(1),
+        ((f64::from(h) * scale).floor() as i32).max(1),
+    )
+}
+
+/// Verschiebt `pos` so, dass ein Fenster der Länge `size` im Bereich `[min, min + total]` liegt.
+pub fn clamp_pos(pos: i32, size: i32, min: i32, total: i32) -> i32 {
+    pos.min(min + total - size).max(min)
+}
+
+/// Setzt das eigene Fenster auf `width` × `height` Pixel (1 Videopixel = 1 Bildschirmpixel),
+/// verkleinert proportional, wenn es nicht in den Arbeitsbereich passt, und schiebt es in den
+/// sichtbaren Bereich. Rückgabe: tatsächlich gesetzte Größe.
+#[cfg(windows)]
+pub fn fit_own_window(width: i32, height: i32) -> Result<(i32, i32), String> {
+    imp::fit_own(width, height)
+}
+
+#[cfg(not(windows))]
+pub fn fit_own_window(_width: i32, _height: i32) -> Result<(i32, i32), String> {
+    Err("Originalgröße wird nur unter Windows unterstützt".into())
+}
+
 /// Ordnet alle FrameScope-Fenster auf dem Monitor des eigenen Fensters an.
 /// Rückgabe: Anzahl der angeordneten Fenster.
 #[cfg(windows)]
@@ -62,6 +93,9 @@ mod imp {
         IsWindowVisible, IsZoomed, SetWindowPos, ShowWindow, GW_OWNER, SWP_NOACTIVATE,
         SWP_NOZORDER, SWP_SHOWWINDOW, SW_RESTORE,
     };
+
+    /// Bereich `(links, oben, breite, höhe)` in Pixeln.
+    type Area = (i32, i32, i32, i32);
 
     struct Found {
         hwnd: HWND,
@@ -139,7 +173,9 @@ mod imp {
         1
     }
 
-    pub fn arrange() -> Result<usize, String> {
+    /// Alle FrameScope-Fenster samt Arbeitsbereich `(links, oben, breite, höhe)` des Monitors
+    /// des eigenen Fensters.
+    fn find_all() -> Result<(Vec<Found>, Area), String> {
         let own_exe = std::env::current_exe()
             .ok()
             .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_lowercase()))
@@ -179,9 +215,14 @@ mod imp {
             info.rcWork.bottom - info.rcWork.top,
         );
 
-        ctx.found.sort_by_key(|f| (f.top, f.left));
-        let (cols, rows) = grid_dims(ctx.found.len());
-        for (i, f) in ctx.found.iter().enumerate() {
+        Ok((ctx.found, area))
+    }
+
+    pub fn arrange() -> Result<usize, String> {
+        let (mut found, area) = find_all()?;
+        found.sort_by_key(|f| (f.top, f.left));
+        let (cols, rows) = grid_dims(found.len());
+        for (i, f) in found.iter().enumerate() {
             let (x, y, w, h) = cell_rect(i, cols, rows, area);
             // SAFETY: gültige Fenster-Handles aus EnumWindows; Fehler (z. B. beendetes Fenster) sind harmlos.
             unsafe {
@@ -199,7 +240,34 @@ mod imp {
                 );
             }
         }
-        Ok(ctx.found.len())
+        Ok(found.len())
+    }
+
+    pub fn fit_own(width: i32, height: i32) -> Result<(i32, i32), String> {
+        let (found, area) = find_all()?;
+        let own = found
+            .iter()
+            .find(|f| f.own)
+            .ok_or("Eigenes Fenster nicht gefunden")?;
+        let (w, h) = super::fit_within(width, height, area.2, area.3);
+        let x = super::clamp_pos(own.left, w, area.0, area.2);
+        let y = super::clamp_pos(own.top, h, area.1, area.3);
+        // SAFETY: gültiges Fenster-Handle aus EnumWindows.
+        unsafe {
+            if IsIconic(own.hwnd) != 0 || IsZoomed(own.hwnd) != 0 {
+                ShowWindow(own.hwnd, SW_RESTORE);
+            }
+            SetWindowPos(
+                own.hwnd,
+                std::ptr::null_mut(),
+                x,
+                y,
+                w,
+                h,
+                SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+            );
+        }
+        Ok((w, h))
     }
 }
 
@@ -244,6 +312,25 @@ mod tests {
             let last_in_row = cols.min(n) - 1;
             assert_eq!(rects[last_in_row].0 + rects[last_in_row].2, area.0 + area.2);
         }
+    }
+
+    #[test]
+    fn fit_within_scales_down_only() {
+        assert_eq!(fit_within(1920, 1080, 3840, 2088), (1920, 1080));
+        assert_eq!(fit_within(3840, 2160, 3840, 2088), (3712, 2088));
+        // Seitenverhältnis bleibt (±1 Pixel Rundung).
+        let (w, h) = fit_within(3840, 2160, 1000, 1000);
+        assert_eq!(w, 1000);
+        assert!((f64::from(w) / f64::from(h) - 16.0 / 9.0).abs() < 0.01);
+        assert_eq!(fit_within(100, 100, 1, 1), (1, 1));
+    }
+
+    #[test]
+    fn clamp_pos_keeps_window_inside() {
+        assert_eq!(clamp_pos(3000, 1920, 0, 3840), 1920); // ragt rechts hinaus → zurückschieben
+        assert_eq!(clamp_pos(-50, 1920, 0, 3840), 0);
+        assert_eq!(clamp_pos(100, 1920, 0, 3840), 100);
+        assert_eq!(clamp_pos(500, 1000, 200, 800), 200); // größer als der Bereich → links ausrichten
     }
 
     #[test]

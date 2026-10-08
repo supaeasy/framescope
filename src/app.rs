@@ -244,6 +244,38 @@ impl PlayerApp {
         }
     }
 
+    /// Fenster auf die Originalgröße des Videos setzen (1 Videopixel = 1 Bildschirmpixel).
+    fn fit_window_to_video(&mut self, ctx: &egui::Context) {
+        let Some((w, h)) = self
+            .player
+            .as_ref()
+            .and_then(|p| p.info.as_ref())
+            .map(|i| (i.width, i.height))
+        else {
+            self.toast(ctx, "Kein Video geladen", true);
+            return;
+        };
+        if self.fullscreen {
+            self.toast(ctx, "Erst Vollbild beenden (F)", true);
+            return;
+        }
+        let (want_w, want_h) = (
+            i32::try_from(w).unwrap_or(i32::MAX),
+            i32::try_from(h).unwrap_or(i32::MAX),
+        );
+        match winutil::fit_own_window(want_w, want_h) {
+            Ok((fw, fh)) if (fw, fh) == (want_w, want_h) => {
+                self.toast(ctx, format!("Originalgröße: {fw}×{fh}"), false);
+            }
+            Ok((fw, fh)) => self.toast(
+                ctx,
+                format!("Video ({want_w}×{want_h}) größer als der Bildschirm – eingepasst auf {fw}×{fh}"),
+                false,
+            ),
+            Err(e) => self.toast(ctx, e, true),
+        }
+    }
+
     fn is_maximized(ctx: &egui::Context) -> bool {
         ctx.input(|i| i.viewport().maximized.unwrap_or(false))
     }
@@ -384,6 +416,7 @@ impl PlayerApp {
             sync_align: bool,
             top: bool,
             arrange: bool,
+            original: bool,
             compare_toggle: bool,
             compare_mode: bool,
             drop_to_b: bool,
@@ -438,6 +471,7 @@ impl PlayerApp {
                         .is_some_and(|p| p.x > i.content_rect().center().x)),
             sync_align: i.consume_key(Modifiers::SHIFT, Key::Y),
             top: i.consume_key(Modifiers::NONE, Key::T),
+            original: i.consume_key(Modifiers::NONE, Key::Num1),
             arrange: i.consume_key(Modifiers::NONE, Key::G),
             sync: i.consume_key(Modifiers::NONE, Key::Y),
         });
@@ -467,6 +501,9 @@ impl PlayerApp {
             self.new_window();
         }
         self.drain_messages(ctx);
+        if k.original {
+            self.fit_window_to_video(ctx);
+        }
         if k.top {
             self.set_always_on_top(ctx, !self.always_on_top);
         }
@@ -810,7 +847,7 @@ impl PlayerApp {
     fn draw_menu(&mut self, ctx: &egui::Context) {
         let (mut open, mut new_win, mut help, mut sync) = (false, false, false, false);
         let (mut cmp_toggle, mut cmp_mode) = (false, false);
-        let (mut pin, mut arrange) = (false, false);
+        let (mut pin, mut arrange, mut original) = (false, false, false);
         let (mut minimize, mut maximize, mut close) = (false, false, false);
         let compare_label = self.compare.as_ref().map(|c| c.mode.label());
         let has_a = self.player.is_some();
@@ -838,6 +875,16 @@ impl PlayerApp {
                     open = ui::ghost_button(ui, Some(ui::Glyph::Regular(ph::FOLDER_OPEN)), "", false, "Datei öffnen (Strg+O)").clicked();
                     new_win = ui::ghost_button(ui, Some(ui::Glyph::Regular(ph::BROWSERS)), "", false, "Neues Fenster (Strg+N)").clicked();
                     arrange = ui::ghost_button(ui, Some(ui::Glyph::Regular(ph::SQUARES_FOUR)), "", false, "Alle FrameScope-Fenster gleich groß und lückenlos anordnen (G)").clicked();
+                    if has_a {
+                        original = ui::ghost_button(
+                            ui,
+                            Some(ui::Glyph::Regular(ph::FRAME_CORNERS)),
+                            "",
+                            false,
+                            "Fenster auf Originalgröße des Videos (1): 1 Videopixel = 1 Bildschirmpixel",
+                        )
+                        .clicked();
+                    }
                     pin = ui::ghost_button(ui, Some(ui::Glyph::Regular(ph::PUSH_PIN)), "", self.always_on_top, "Immer im Vordergrund (T)").clicked();
                     help = ui::ghost_button(ui, Some(ui::Glyph::Regular(ph::QUESTION)), "", self.help, "Tastenkürzel (F1)").clicked();
                     if let Some(mode) = compare_label {
@@ -884,6 +931,9 @@ impl PlayerApp {
         }
         if arrange {
             self.arrange_windows(ctx);
+        }
+        if original {
+            self.fit_window_to_video(ctx);
         }
         if pin {
             self.set_always_on_top(ctx, !self.always_on_top);
@@ -966,6 +1016,7 @@ impl PlayerApp {
                 "Ziehen im Bild",
                 "Fenster verschieben (Alt + Ziehen: immer)",
             ),
+            ("1", "Fenster auf Originalgröße des Videos"),
             ("T  ·  G", "Immer im Vordergrund  ·  Fenster anordnen"),
             ("Strg + B  ·  C", "Vergleich mit Video B  ·  Modus wechseln"),
             (

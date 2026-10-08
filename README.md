@@ -37,6 +37,7 @@ geschrieben in Rust. Kein Installer, keine Registry-Einträge, keine Daten in `%
 | `M` | Stumm |
 | `↑` / `↓` | Lautstärke ±5 % |
 | `F` / `Esc` / Doppelklick | Vollbild |
+| `1` | Fenster auf die **Originalgröße des Videos** setzen (1 Videopixel = 1 Bildschirmpixel) |
 | `T` | Fenster **immer im Vordergrund** (an/aus) |
 | `G` | Alle FrameScope-Fenster **anordnen** (siehe unten) |
 | Ziehen im Bild | Fenster verschieben (im Schieber-/Überblenden-Modus am oberen Rand oder mit `Alt`) |
@@ -61,7 +62,9 @@ framescope.exe "C:\Videos\clip.mp4"
 Das Fenster hat **keine Titelleiste** – nur das Bild. Oben rechts erscheinen bei Mausbewegung die Schaltflächen
 (Öffnen, neues Fenster, Anordnen, Vordergrund, Hilfe, Vergleichen, Sync) und die **Fenstersteuerung**
 (minimieren, maximieren, schließen). Verschieben geht per **Ziehen im Bild**, die Größe ändert man an den Fensterrändern
-und -ecken. Der Pin-Button (oder `T`) hält das Fenster über allen anderen.
+und -ecken. Der Pin-Button (oder `T`) hält das Fenster über allen anderen. Der Button **Originalgröße** (oder `1`) setzt das Fenster
+auf die Auflösung des Videos – pixelgenau 1:1; ist das Video größer als der Arbeitsbereich, wird es proportional
+eingepasst, und das Fenster wird in den sichtbaren Bereich geschoben.
 
 **Anordnen** (Button oder `G`): Alle offenen FrameScope-Fenster werden auf dem Monitor des aktuellen Fensters gleich
 groß, **lückenlos und ohne Überlappung** im Raster angeordnet – 1 Fenster füllt den Arbeitsbereich, 2–3 liegen
