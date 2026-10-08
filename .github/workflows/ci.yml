@@ -40,4 +40,7 @@ jobs:
 
       - name: Smoke-Test (EXE startet mit DLLs)
         shell: pwsh
-        run: ./target/release/framescope.exe --version; if ($LASTEXITCODE -ne 0) { throw "Exit-Code $LASTEXITCODE" }
+        # GUI-Subsystem-EXE: PowerShell wartet nicht von selbst, daher Start-Process -Wait.
+        run: |
+          $p = Start-Process ./target/release/framescope.exe -ArgumentList "--version" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "Exit-Code $($p.ExitCode)" }
