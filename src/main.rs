@@ -32,6 +32,7 @@ fn main() -> anyhow::Result<()> {
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_title("FrameScope")
+            .with_icon(window_icon())
             .with_inner_size([1280.0, 720.0])
             .with_min_inner_size([480.0, 320.0])
             .with_drag_and_drop(true),
@@ -46,4 +47,20 @@ fn main() -> anyhow::Result<()> {
         }),
     )
     .map_err(|e| anyhow::anyhow!("UI-Fehler: {e}"))
+}
+
+/// Fenstericon (in der EXE eingebettet).
+fn window_icon() -> eframe::egui::IconData {
+    let bytes = include_bytes!("../assets/icon-256.png");
+    match image::load_from_memory(bytes) {
+        Ok(img) => {
+            let rgba = img.to_rgba8();
+            eframe::egui::IconData {
+                width: rgba.width(),
+                height: rgba.height(),
+                rgba: rgba.into_raw(),
+            }
+        }
+        Err(_) => eframe::egui::IconData::default(),
+    }
 }

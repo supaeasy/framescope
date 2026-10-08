@@ -9,6 +9,8 @@ const FILE_NAME: &str = "framescope.ini";
 pub struct Settings {
     pub volume: f32,
     pub muted: bool,
+    /// Dauerhaftes Info-Overlay (Frame, Timecode, KEY) oben links.
+    pub hud: bool,
     /// Standardordner für den PNG-Export (`None` = beim ersten Export fragen).
     pub export_dir: Option<PathBuf>,
 }
@@ -18,6 +20,7 @@ impl Default for Settings {
         Self {
             volume: 0.8,
             muted: false,
+            hud: false,
             export_dir: None,
         }
     }
@@ -54,6 +57,7 @@ impl Settings {
                     }
                 }
                 "muted" => s.muted = value == "true",
+                "hud" => s.hud = value == "true",
                 "export_dir" if !value.is_empty() => s.export_dir = Some(PathBuf::from(value)),
                 _ => {}
             }
@@ -64,8 +68,8 @@ impl Settings {
     pub fn serialize(&self) -> String {
         let mut out = String::from("# FrameScope – Einstellungen (portabel, neben der EXE)\n");
         out.push_str(&format!(
-            "volume={:.2}\nmuted={}\n",
-            self.volume, self.muted
+            "volume={:.2}\nmuted={}\nhud={}\n",
+            self.volume, self.muted, self.hud
         ));
         if let Some(d) = &self.export_dir {
             out.push_str(&format!("export_dir={}\n", d.display()));
@@ -90,6 +94,7 @@ mod tests {
         let s = Settings {
             volume: 0.35,
             muted: true,
+            hud: true,
             export_dir: Some(PathBuf::from("C:\\Frames")),
         };
         assert_eq!(Settings::parse(&s.serialize()), s);

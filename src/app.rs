@@ -32,6 +32,8 @@ pub struct PlayerApp {
     export_dir_changed: bool,
     volume: f32,
     muted: bool,
+    hud: bool,
+    help: bool,
     error: Option<String>,
     texture: Option<egui::TextureHandle>,
     last_activity: f64,
@@ -49,6 +51,8 @@ impl PlayerApp {
             player: None,
             volume: settings.volume,
             muted: settings.muted,
+            hud: settings.hud,
+            help: false,
             settings,
             export_dir_changed: false,
             error: None,
@@ -212,6 +216,8 @@ impl PlayerApp {
             export_as: bool,
             fullscreen: bool,
             escape: bool,
+            hud: bool,
+            help: bool,
         }
         // Zählt Tastendrücke (inkl. Wiederholungen) und verbraucht sie.
         fn presses(i: &mut egui::InputState, mods: Modifiers, key: Key) -> usize {
@@ -251,6 +257,8 @@ impl PlayerApp {
             export: i.consume_key(Modifiers::NONE, Key::S),
             fullscreen: i.consume_key(Modifiers::NONE, Key::F),
             escape: i.consume_key(Modifiers::NONE, Key::Escape),
+            hud: i.consume_key(Modifiers::NONE, Key::H),
+            help: i.consume_key(Modifiers::NONE, Key::F1),
         });
         if let Some(path) = k.dropped {
             self.open(ctx, path);
@@ -262,7 +270,15 @@ impl PlayerApp {
             Self::new_window();
         }
         self.drain_messages(ctx);
-        if k.fullscreen {
+        if k.hud {
+            self.hud = !self.hud;
+        }
+        if k.help {
+            self.help = !self.help;
+        }
+        if k.escape && self.help {
+            self.help = false;
+        } else if k.fullscreen {
             self.set_fullscreen(ctx, !self.fullscreen);
         } else if k.escape && self.fullscreen {
             self.set_fullscreen(ctx, false);
@@ -361,7 +377,8 @@ impl PlayerApp {
 
     /// Dezentes Menü oben rechts: Öffnen, neues Fenster, PNG, Vollbild.
     fn draw_menu(&mut self, ctx: &egui::Context) {
-        let (mut open, mut new_win, mut png, mut full) = (false, false, false, false);
+        let (mut open, mut new_win, mut png, mut full, mut help) =
+            (false, false, false, false, false);
         let has_frame = self.player.as_ref().is_some_and(|p| p.current.is_some());
         egui::Area::new(egui::Id::new("menu"))
             .anchor(Align2::RIGHT_TOP, [-14.0, 14.0])
@@ -384,6 +401,7 @@ impl PlayerApp {
                                 has_frame,
                             );
                             full = menu_button(ui, "Vollbild", "Vollbild (F, Esc beendet)", true);
+                            help = menu_button(ui, "?", "Tastenkürzel (F1)", true);
                         });
                     });
             });
@@ -399,6 +417,94 @@ impl PlayerApp {
         if full {
             self.set_fullscreen(ctx, !self.fullscreen);
         }
+        if help {
+            self.help = !self.help;
+        }
+    }
+
+    /// Dauerhaftes Info-Overlay oben links (für Vergleiche und Screenshots).
+    fn draw_hud(&self, ctx: &egui::Context) {
+        let Some(p) = self.player.as_ref() else {
+            return;
+        };
+        let Some(cur) = &p.current else { return };
+        let (frame_txt, tc_txt) = frame_texts(p);
+        let key = is_key(p, cur.pts, cur.key);
+        egui::Area::new(egui::Id::new("hud"))
+            .anchor(Align2::LEFT_TOP, [14.0, 14.0])
+            .order(egui::Order::Foreground)
+            .interactable(false)
+            .show(ctx, |ui| {
+                egui::Frame::new()
+                    .fill(Color32::from_black_alpha(150))
+                    .corner_radius(8.0)
+                    .inner_margin(egui::Margin::symmetric(10, 6))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(frame_txt).monospace().size(16.0));
+                            ui.label(
+                                RichText::new(tc_txt)
+                                    .monospace()
+                                    .size(16.0)
+                                    .color(ui::TEXT_DIM),
+                            );
+                            if key {
+                                ui.label(
+                                    RichText::new(" KEY ")
+                                        .monospace()
+                                        .size(13.0)
+                                        .color(Color32::BLACK)
+                                        .background_color(ui::KEY),
+                                );
+                            }
+                        });
+                    });
+            });
+    }
+
+    fn draw_help(&mut self, ctx: &egui::Context) {
+        if !self.help {
+            return;
+        }
+        const ROWS: &[(&str, &str)] = &[
+            ("Leertaste", "Wiedergabe / Pause"),
+            ("← / →", "Ein Frame zurück / vor"),
+            ("Umschalt + ← / →", "Voriger / nächster Keyframe"),
+            ("↑ / ↓  ·  M", "Lautstärke  ·  Stumm"),
+            ("I  /  O", "Loop-Anfang / -Ende setzen"),
+            ("L  ·  X", "Loop an/aus  ·  Marker löschen"),
+            ("S  ·  Umschalt + S", "Frame als PNG  ·  Ordner wählen"),
+            ("F  ·  Esc", "Vollbild  ·  beenden"),
+            ("H", "Info-Overlay (Frame, Timecode, KEY)"),
+            ("Strg + O  ·  Strg + N", "Datei öffnen  ·  Neues Fenster"),
+            ("F1", "Diese Hilfe"),
+        ];
+        let mut open = true;
+        egui::Window::new("Tastenkürzel")
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
+            .frame(
+                egui::Frame::new()
+                    .fill(Color32::from_rgb(0x14, 0x15, 0x19))
+                    .corner_radius(12.0)
+                    .stroke(Stroke::new(1.0, Color32::from_white_alpha(24)))
+                    .inner_margin(egui::Margin::same(16)),
+            )
+            .show(ctx, |ui| {
+                egui::Grid::new("help_grid")
+                    .num_columns(2)
+                    .spacing([24.0, 8.0])
+                    .show(ui, |ui| {
+                        for (keys, what) in ROWS {
+                            ui.label(RichText::new(*keys).monospace().size(13.0).color(ui::KEY));
+                            ui.label(RichText::new(*what).size(13.0));
+                            ui.end_row();
+                        }
+                    });
+            });
+        self.help = open;
     }
 
     fn draw_toast(&mut self, ctx: &egui::Context) {
@@ -632,6 +738,10 @@ impl eframe::App for PlayerApp {
         } else if self.texture.is_some() {
             ctx.set_cursor_icon(CursorIcon::None);
         }
+        if self.hud {
+            self.draw_hud(&ctx);
+        }
+        self.draw_help(&ctx);
         self.draw_toast(&ctx);
 
         if playing {
@@ -646,6 +756,7 @@ impl eframe::App for PlayerApp {
         let mut s = Settings::load();
         s.volume = self.volume;
         s.muted = self.muted;
+        s.hud = self.hud;
         if self.export_dir_changed {
             s.export_dir = self.settings.export_dir.clone();
         }

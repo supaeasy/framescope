@@ -4,6 +4,7 @@
 use std::{env, fs, path::PathBuf};
 
 fn main() {
+    embed_windows_resources();
     println!("cargo:rerun-if-env-changed=FFMPEG_DIR");
     let (Some(ffmpeg), Some(out)) = (env::var_os("FFMPEG_DIR"), env::var_os("OUT_DIR")) else {
         return;
@@ -26,4 +27,26 @@ fn main() {
             }
         }
     }
+}
+
+/// Bettet Icon und Versionsinfo in die EXE ein (nur Windows-Ziele).
+fn embed_windows_resources() {
+    println!("cargo:rerun-if-changed=assets/app.rc");
+    println!("cargo:rerun-if-changed=assets/icon.ico");
+    if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
+        return;
+    }
+    let version = env::var("CARGO_PKG_VERSION").unwrap_or_else(|_| "0.0.0".into());
+    let mut parts: Vec<&str> = version.split('.').collect();
+    parts.resize(4, "0");
+    let comma = parts.join(",");
+    embed_resource::compile(
+        "assets/app.rc",
+        [
+            format!("VER_COMMA={comma}"),
+            format!("VER_STR=\"{version}\""),
+        ],
+    )
+    .manifest_optional()
+    .ok();
 }
