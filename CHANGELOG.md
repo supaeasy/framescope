@@ -5,6 +5,8 @@ Alle nennenswerten Änderungen an FrameScope. Das Format folgt
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-08
+
 ### Geändert
 - **Lizenz:** neue Lizenz „FrameScope License (No Sale Without Permission)“ – Nutzung, Änderung und Weitergabe bleiben frei, der **Verkauf** der Software oder abgeleiteter Versionen ist nur mit vorheriger schriftlicher Genehmigung erlaubt. Version 0.2.0 und älter bleibt unter der MIT-Lizenz.
 
@@ -38,6 +40,7 @@ Erste Version.
 - Dunkle, minimalistische Oberfläche mit ein-/ausblendbaren Controls, Fenster- und EXE-Icon.
 - Korrekte Farbmatrix (BT.601/709/2020) bei der YUV→RGB-Umrechnung.
 
-[Unreleased]: https://github.com/supaeasy/framescope/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/supaeasy/framescope/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/supaeasy/framescope/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/supaeasy/framescope/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/supaeasy/framescope/releases/tag/v0.1.0
