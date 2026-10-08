@@ -57,6 +57,8 @@ pub struct PlayerApp {
     msg_rx: Receiver<Msg>,
     /// Entwickler-Benchmark: nach N Sekunden Statistik schreiben und beenden.
     bench: Option<(f64, f64)>,
+    /// Bench-Statistik der Oberfläche: letzte Zeit, Anzahl später UI-Frames, größtes Intervall.
+    ui_stats: (f64, u64, f64),
 }
 
 impl PlayerApp {
@@ -91,6 +93,7 @@ impl PlayerApp {
             toast: None,
             msg_tx,
             msg_rx,
+            ui_stats: (-1.0, 0, 0.0),
             bench: std::env::var("FRAMESCOPE_BENCH")
                 .ok()
                 .and_then(|v| v.parse::<f64>().ok())
@@ -1075,17 +1078,36 @@ impl PlayerApp {
         if *start < 0.0 {
             *start = time;
         }
+        if p.playing {
+            let (last, late, max) = &mut self.ui_stats;
+            if *last >= 0.0 {
+                let dt = time - *last;
+                *max = max.max(dt);
+                if dt > 1.5 / p.fps() {
+                    *late += 1;
+                }
+            }
+            *last = time;
+        }
         if time - *start >= *secs {
+            let (_, ui_late, ui_max) = self.ui_stats;
             let text = format!(
-                "shown={} dropped={} wall={:.2}s position={:.2}s
+                "shown={} dropped={} starved={} seeks={} ui_late={} ui_max_ms={:.1} wall={:.2}s position={:.2}s
 ",
                 p.shown,
                 p.dropped,
+                p.starved,
+                p.hard_seeks,
+                ui_late,
+                ui_max * 1000.0,
                 time - *start,
                 p.position()
             );
             if let Ok(exe) = std::env::current_exe() {
-                let _ = std::fs::write(exe.with_file_name("framescope-bench.txt"), text);
+                let _ = std::fs::write(
+                    exe.with_file_name(format!("framescope-bench-{}.txt", std::process::id())),
+                    text,
+                );
             }
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
@@ -1277,12 +1299,18 @@ impl PlayerApp {
                             ui.add_space(6.0);
                             ui.label(RichText::new(b).size(12.0).color(ui::N400));
                         }
-                        if p.dropped > 0 {
+                        if p.dropped > 0 || p.starved > 0 {
                             ui.add_space(6.0);
                             ui.label(
-                                RichText::new(format!("{} verworfen", p.dropped))
-                                    .size(11.0)
-                                    .color(ui::ERROR),
+                                RichText::new(format!(
+                                    "{} verworfen · {}× Decoder zu langsam",
+                                    p.dropped, p.starved
+                                ))
+                                .size(11.0)
+                                .color(ui::ERROR),
+                            )
+                            .on_hover_text(
+                                "verworfen: Anzeige kam nicht hinterher (Oberfläche/Grafik) ·                                  Decoder zu langsam: der nächste Frame war nicht rechtzeitig dekodiert",
                             );
                         }
 

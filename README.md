@@ -189,9 +189,17 @@ Gemessen auf einem 16-Thread-Desktop (Software-Decoding, Texturupload als RGBA, 
 Der Decoder schafft deutlich mehr als nötig (z. B. 4K: ~100 Frames/s inkl. RGBA-Konvertierung). Die Infozeile zeigt
 „N verworfen“, falls Frames zu spät kommen. Mögliche spätere Optimierungen: YUV-Upload mit Shader, D3D11VA.
 
+**Ruckelt es?** Rechts neben dem Frame-Zähler erscheint in Rot `N verworfen · M× Decoder zu langsam`, sobald Frames
+ausfallen. *Verworfen* heißt: die Anzeige kam nicht hinterher (Oberfläche/Grafik, z. B. viele Fenster bei 60 fps auf
+einem 60-Hz-Monitor); *Decoder zu langsam* heißt: der nächste Frame war nicht rechtzeitig dekodiert (Auflösung, Codec,
+Bitrate). Zum Eingrenzen gibt es Umgebungsvariablen (vor dem Start setzen): `FRAMESCOPE_NO_VSYNC=1` (ohne V-Sync,
+nur zur Diagnose), `FRAMESCOPE_DECODE_THREADS=<n>` (Decoder-Threads), `FRAMESCOPE_QUEUE=<n>` (Frames Vorlauf) und
+`FRAMESCOPE_UI_PRIO=1` (Oberfläche höher priorisieren).
+
 Entwickler-Hilfen: `framescope.exe --version`, `--bench <datei>` (Decoder-Durchsatz und Index, ohne Fenster),
 `--audio-selftest <datei>` (Drift der Audio-Clock) sowie die Umgebungsvariable `FRAMESCOPE_BENCH=<sekunden>`
-(schreibt `framescope-bench.txt` neben die EXE und beendet das Programm).
+(schreibt `framescope-bench-<PID>.txt` mit Zählern für angezeigte/verworfene Frames, Decoder-Hunger, Seeks und späte
+UI-Frames neben die EXE und beendet das Programm).
 
 ## Projektstruktur
 

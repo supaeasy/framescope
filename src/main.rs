@@ -60,7 +60,14 @@ fn main() -> anyhow::Result<()> {
         }
     }
 
+    if std::env::var("FRAMESCOPE_UI_PRIO").is_ok() {
+        raise_ui_priority();
+    }
     let options = eframe::NativeOptions {
+        glow_options: eframe::egui_glow::GlowConfiguration {
+            vsync: std::env::var("FRAMESCOPE_NO_VSYNC").is_err(),
+            ..Default::default()
+        },
         viewport: eframe::egui::ViewportBuilder::default()
             .with_title("FrameScope")
             .with_decorations(false)
@@ -94,5 +101,17 @@ fn window_icon() -> eframe::egui::IconData {
             }
         }
         Err(_) => eframe::egui::IconData::default(),
+    }
+}
+
+/// Hebt den UI-Thread über normale Priorität, damit die Oberfläche von Decoder-Threads nicht verdrängt wird.
+fn raise_ui_priority() {
+    #[cfg(windows)]
+    // SAFETY: setzt nur die Priorität des aktuellen Threads.
+    unsafe {
+        use windows_sys::Win32::System::Threading::{
+            GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_ABOVE_NORMAL,
+        };
+        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
     }
 }

@@ -14,6 +14,14 @@ const AV_TIME_BASE: f64 = 1_000_000.0;
 /// Anzahl vorab dekodierter Frames, die in der UI-Queue warten dürfen.
 const QUEUE_DEPTH: usize = 3;
 
+/// Entwickler-Schalter aus der Umgebung (nur zum Messen).
+fn env_usize(name: &str, default: usize) -> usize {
+    std::env::var(name)
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(default)
+}
+
 #[derive(Clone, Debug)]
 pub struct VideoInfo {
     pub width: u32,
@@ -61,7 +69,7 @@ impl DecoderHandle {
     /// Das Droppen des Handles beendet den Thread.
     pub fn spawn(path: PathBuf, wake: impl Fn() + Send + Sync + Clone + 'static) -> Self {
         let (cmd_tx, cmd_rx) = unbounded();
-        let (ev_tx, ev_rx) = bounded(QUEUE_DEPTH);
+        let (ev_tx, ev_rx) = bounded(env_usize("FRAMESCOPE_QUEUE", QUEUE_DEPTH));
         let (idx_tx, idx_rx) = bounded(1);
         let (idx_path, idx_wake) = (path.clone(), wake.clone());
         let scan = thread::Builder::new().name("index".into()).spawn(move || {
@@ -136,7 +144,7 @@ impl Source {
             .context("Codec-Parameter ungültig")?;
         ctx.set_threading(ffmpeg::threading::Config {
             kind: ffmpeg::threading::Type::Frame,
-            count: 0,
+            count: env_usize("FRAMESCOPE_DECODE_THREADS", 0),
         });
         let decoder = ctx
             .decoder()

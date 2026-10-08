@@ -24,6 +24,11 @@ pub struct Player {
     /// Angezeigte und verworfene (zu spät dekodierte) Frames, für die Performance-Anzeige.
     pub shown: u64,
     pub dropped: u64,
+    /// Wie oft der Decoder beim Abspielen zu spät lieferte (kein Frame bereit, obwohl fällig).
+    pub starved: u64,
+    /// Anzahl Seeks über den Decoder (Sprünge, Schleifen, Sync-Korrekturen).
+    pub hard_seeks: u64,
+    starving: bool,
     /// Zähler für Zustandsänderungen (Play/Pause/Seek/Schritt); dient der Instanz-Synchronisierung.
     pub events: u64,
     /// Gemessene Dauer eines Seeks bis zum angezeigten Zielframe (Sekunden, geglättet).
@@ -77,6 +82,9 @@ impl Player {
             path,
             shown: 0,
             dropped: 0,
+            starved: 0,
+            hard_seeks: 0,
+            starving: false,
             events: 0,
             seek_latency: 0.15,
             seek_started: None,
@@ -206,6 +214,20 @@ impl Player {
         let changed = assigned > 0;
         self.shown += assigned.min(1);
         self.dropped += assigned.saturating_sub(1);
+        // Decoder-Hunger: abgespielt, ein Frame wäre fällig, aber keiner liegt bereit.
+        let overdue = self.playing
+            && self.target.is_none()
+            && !self.eof
+            && self.pending.is_none()
+            && assigned == 0
+            && self
+                .current
+                .as_ref()
+                .is_some_and(|c| self.position() > c.pts + 1.5 / self.fps());
+        if overdue && !self.starving {
+            self.starved += 1;
+        }
+        self.starving = overdue;
         self.fill_key_fracs();
         self.sync_audio();
         // Ende erreicht und letzter Frame angezeigt → stoppen.
@@ -337,6 +359,7 @@ impl Player {
     /// Springt per Decoder zu `time`; liefert ab `from` alle Frames (Prefetch für den Cache).
     fn hard_seek(&mut self, time: f64, from: f64) {
         self.events += 1;
+        self.hard_seeks += 1;
         self.seek_started = Some(Instant::now());
         self.serial += 1;
         self.target = Some(time - EPS);

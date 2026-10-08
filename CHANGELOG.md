@@ -5,6 +5,10 @@ Alle nennenswerten Änderungen an FrameScope. Das Format folgt
 
 ## [Unreleased]
 
+### Hinzugefügt
+- Rote Warnanzeige bei Frame-Ausfällen: unterscheidet „verworfen“ (Anzeige zu langsam) von „Decoder zu langsam“.
+- Diagnose-Schalter per Umgebungsvariable (`FRAMESCOPE_NO_VSYNC`, `FRAMESCOPE_DECODE_THREADS`, `FRAMESCOPE_QUEUE`, `FRAMESCOPE_UI_PRIO`); erweiterte Statistik von `FRAMESCOPE_BENCH`.
+
 ## [0.4.0] - 2026-10-09
 
 ### Hinzugefügt
