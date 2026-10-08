@@ -832,6 +832,7 @@ dependencies = [
  "ffmpeg-next",
  "image",
  "rfd",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

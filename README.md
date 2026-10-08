@@ -26,7 +26,7 @@ geschrieben in Rust. Kein Installer, keine Registry-Einträge, keine Daten in `%
 
 | Taste | Aktion |
 |---|---|
-| `Leertaste` | Wiedergabe / Pause |
+| `Leertaste` oder **Klick ins Bild** | Wiedergabe / Pause |
 | `←` / `→` | Ein Frame zurück / vor |
 | `Umschalt` + `←` / `→` | Voriger / nächster Keyframe |
 | `I` / `O` | Loop-Anfang / Loop-Ende auf den aktuellen Frame setzen |
@@ -37,6 +37,9 @@ geschrieben in Rust. Kein Installer, keine Registry-Einträge, keine Daten in `%
 | `M` | Stumm |
 | `↑` / `↓` | Lautstärke ±5 % |
 | `F` / `Esc` / Doppelklick | Vollbild |
+| `T` | Fenster **immer im Vordergrund** (an/aus) |
+| `G` | Alle FrameScope-Fenster **anordnen** (siehe unten) |
+| Ziehen im Bild | Fenster verschieben (im Schieber-/Überblenden-Modus am oberen Rand oder mit `Alt`) |
 | `Strg` + `B` | Zweites Video **B** zum Vergleich öffnen (nochmal drücken: Vergleich beenden) |
 | `C` | Vergleichsmodus wechseln (Schieber → Nebeneinander → Überblenden) |
 | `Y` | Wiedergabe mit anderen FrameScope-Fenstern **synchronisieren** (an/aus) |
@@ -52,6 +55,19 @@ startet den A/B-Vergleich):
 ```powershell
 framescope.exe "C:\Videos\clip.mp4"
 ```
+
+### Fenster: rahmenlos, Vordergrund, Anordnen
+
+Das Fenster hat **keine Titelleiste** – nur das Bild. Oben rechts erscheinen bei Mausbewegung die Schaltflächen
+(Öffnen, neues Fenster, Anordnen, Vordergrund, Hilfe, Vergleichen, Sync) und die **Fenstersteuerung**
+(minimieren, maximieren, schließen). Verschieben geht per **Ziehen im Bild**, die Größe ändert man an den Fensterrändern
+und -ecken. Der Pin-Button (oder `T`) hält das Fenster über allen anderen.
+
+**Anordnen** (Button oder `G`): Alle offenen FrameScope-Fenster werden auf dem Monitor des aktuellen Fensters gleich
+groß, **lückenlos und ohne Überlappung** im Raster angeordnet – 1 Fenster füllt den Arbeitsbereich, 2–3 liegen
+übereinander, 4 im 2×2-Raster, 5–6 in 3×2, 7–9 in 3×3 usw. (Reihenfolge nach der bisherigen Position, zeilenweise).
+Gefunden werden alle Fenster mit dem Titel „… – FrameScope“, die zu einer `framescope.exe` gehören – auch Instanzen aus
+anderen Ordnern.
 
 ### Frame-Zählung, Timecode und VFR
 

@@ -12,6 +12,7 @@ mod sync;
 mod timecode;
 mod timeline;
 mod ui;
+mod winutil;
 
 use std::path::PathBuf;
 
@@ -62,6 +63,7 @@ fn main() -> anyhow::Result<()> {
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_title("FrameScope")
+            .with_decorations(false)
             .with_icon(window_icon())
             .with_inner_size([1280.0, 720.0])
             .with_min_inner_size([480.0, 320.0])

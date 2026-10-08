@@ -6,7 +6,7 @@ use crate::player::Player;
 use crate::settings::Settings;
 use crate::sync::SyncController;
 use crate::timeline::LoopBand;
-use crate::{export, timecode, timeline, ui};
+use crate::{export, timecode, timeline, ui, winutil};
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use eframe::egui::{
     self, Align2, Color32, CursorIcon, Key, Modifiers, Rect, RichText, Sense, Stroke,
@@ -49,6 +49,9 @@ pub struct PlayerApp {
     texture: Option<egui::TextureHandle>,
     last_activity: f64,
     fullscreen: bool,
+    always_on_top: bool,
+    /// Das Fenster wird gerade per Ziehen im Bild verschoben (nicht den Schieber bewegen).
+    window_drag: bool,
     toast: Option<(String, bool, f64)>,
     msg_tx: Sender<Msg>,
     msg_rx: Receiver<Msg>,
@@ -83,6 +86,8 @@ impl PlayerApp {
             texture: None,
             last_activity: 0.0,
             fullscreen: false,
+            always_on_top: false,
+            window_drag: false,
             toast: None,
             msg_tx,
             msg_rx,
@@ -213,6 +218,34 @@ impl PlayerApp {
                 true,
             );
         }
+    }
+
+    /// Fenster immer im Vordergrund halten (oder zurück auf normal).
+    fn set_always_on_top(&mut self, ctx: &egui::Context, on: bool) {
+        self.always_on_top = on;
+        let level = if on {
+            egui::viewport::WindowLevel::AlwaysOnTop
+        } else {
+            egui::viewport::WindowLevel::Normal
+        };
+        ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(level));
+    }
+
+    /// Alle offenen FrameScope-Fenster gleich groß und lückenlos im Raster anordnen.
+    fn arrange_windows(&mut self, ctx: &egui::Context) {
+        match winutil::arrange_windows() {
+            Ok(1) => self.toast(
+                ctx,
+                "Nur ein Fenster geöffnet – füllt jetzt den Bildschirm",
+                false,
+            ),
+            Ok(n) => self.toast(ctx, format!("{n} Fenster angeordnet"), false),
+            Err(e) => self.toast(ctx, e, true),
+        }
+    }
+
+    fn is_maximized(ctx: &egui::Context) -> bool {
+        ctx.input(|i| i.viewport().maximized.unwrap_or(false))
     }
 
     fn set_fullscreen(&mut self, ctx: &egui::Context, on: bool) {
@@ -349,6 +382,8 @@ impl PlayerApp {
             help: bool,
             sync: bool,
             sync_align: bool,
+            top: bool,
+            arrange: bool,
             compare_toggle: bool,
             compare_mode: bool,
             drop_to_b: bool,
@@ -402,6 +437,8 @@ impl PlayerApp {
                         .hover_pos()
                         .is_some_and(|p| p.x > i.content_rect().center().x)),
             sync_align: i.consume_key(Modifiers::SHIFT, Key::Y),
+            top: i.consume_key(Modifiers::NONE, Key::T),
+            arrange: i.consume_key(Modifiers::NONE, Key::G),
             sync: i.consume_key(Modifiers::NONE, Key::Y),
         });
         if let Some(path) = k.dropped {
@@ -430,6 +467,12 @@ impl PlayerApp {
             self.new_window();
         }
         self.drain_messages(ctx);
+        if k.top {
+            self.set_always_on_top(ctx, !self.always_on_top);
+        }
+        if k.arrange {
+            self.arrange_windows(ctx);
+        }
         if k.sync {
             self.toggle_sync(ctx);
         }
@@ -494,9 +537,37 @@ impl PlayerApp {
         let full = ui.max_rect();
         ui.painter().rect_filled(full, 0.0, ui::BG);
         let resp = ui.interact(full, egui::Id::new("video_area"), Sense::click_and_drag());
-        // Doppelklick auf das Video: Vollbild umschalten.
+        if !resp.dragged() {
+            self.window_drag = false;
+        }
+        // Ziehen im Bild verschiebt das Fenster – im Schieber-/Überblenden-Modus nur am oberen
+        // Rand (wie eine Titelleiste) oder mit gedrückter Alt-Taste, sonst bewegt es den Schieber.
+        if resp.drag_started_by(egui::PointerButton::Primary) {
+            let alt = ctx.input(|i| i.modifiers.alt);
+            let in_top_strip = resp
+                .interact_pointer_pos()
+                .is_some_and(|p| p.y < full.top() + 44.0);
+            let slider_mode = self
+                .compare
+                .as_ref()
+                .is_some_and(|c| matches!(c.mode, compare::Mode::Wipe | compare::Mode::Blend));
+            if alt || in_top_strip || !slider_mode {
+                self.window_drag = true;
+                ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
+            }
+        }
+        let split_drag = resp.dragged() && !self.window_drag;
+        // Klick ins Bild: Wiedergabe/Pause. Doppelklick: Vollbild (der erste Klick hat schon
+        // umgeschaltet, deshalb hier zurückschalten).
         if resp.double_clicked() {
             self.set_fullscreen(ctx, !self.fullscreen);
+            if let Some(p) = self.player.as_mut() {
+                p.toggle();
+            }
+        } else if resp.clicked() {
+            if let Some(p) = self.player.as_mut() {
+                p.toggle();
+            }
         }
         let Some(tex_a) = self.texture.clone() else {
             return;
@@ -520,7 +591,7 @@ impl PlayerApp {
             compare::Mode::Wipe => {
                 let rect = compare::fit(full, tex_a.size_vec2());
                 painter.image(tex_a.id(), rect, compare::FULL_UV, Color32::WHITE);
-                if resp.dragged() {
+                if split_drag {
                     if let Some(x) = pointer_x {
                         c.split = ((x - rect.left()) / rect.width()).clamp(0.0, 1.0);
                     }
@@ -535,7 +606,7 @@ impl PlayerApp {
                 let near = ctx
                     .input(|i| i.pointer.hover_pos())
                     .is_some_and(|p| (p.x - x).abs() < 14.0 && rect.contains(p));
-                if near || resp.dragged() {
+                if near || split_drag {
                     ctx.set_cursor_icon(CursorIcon::ResizeHorizontal);
                 }
                 painter.line_segment(
@@ -601,7 +672,7 @@ impl PlayerApp {
             compare::Mode::Blend => {
                 let rect = compare::fit(full, tex_a.size_vec2());
                 painter.image(tex_a.id(), rect, compare::FULL_UV, Color32::WHITE);
-                if resp.dragged() {
+                if split_drag {
                     if let Some(x) = pointer_x {
                         c.split = ((x - rect.left()) / rect.width()).clamp(0.0, 1.0);
                     }
@@ -621,6 +692,12 @@ impl PlayerApp {
 
     fn draw_placeholder(&self, ui: &mut egui::Ui) {
         let full = ui.max_rect();
+        if ui
+            .interact(full, egui::Id::new("placeholder_area"), Sense::drag())
+            .drag_started()
+        {
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
+        }
         let p = ui.painter();
         let (title, hint) = match (&self.error, &self.player) {
             (Some(e), _) => ("Datei konnte nicht geöffnet werden".to_owned(), e.clone()),
@@ -652,16 +729,105 @@ impl PlayerApp {
         );
     }
 
-    /// Schaltflächen oben rechts: Öffnen, neues Fenster, Hilfe, Vergleichen, Sync.
+    /// Dünner Rand um das rahmenlose Fenster und unsichtbare Griffe zum Ändern der Größe.
+    fn draw_window_frame(&self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        let full = ui.max_rect();
+        ui.painter().rect_stroke(
+            full,
+            0.0,
+            Stroke::new(1.0, ui::alpha(ui::N700, 0.7)),
+            egui::StrokeKind::Inside,
+        );
+        if self.fullscreen || Self::is_maximized(ctx) {
+            return;
+        }
+        use egui::viewport::ResizeDirection as Dir;
+        const EDGE: f32 = 5.0;
+        const CORNER: f32 = 12.0;
+        let (l, t, r, b) = (full.left(), full.top(), full.right(), full.bottom());
+        let grips: [(&str, Rect, Dir, CursorIcon); 8] = [
+            (
+                "n",
+                Rect::from_min_max(egui::pos2(l + CORNER, t), egui::pos2(r - CORNER, t + EDGE)),
+                Dir::North,
+                CursorIcon::ResizeVertical,
+            ),
+            (
+                "s",
+                Rect::from_min_max(egui::pos2(l + CORNER, b - EDGE), egui::pos2(r - CORNER, b)),
+                Dir::South,
+                CursorIcon::ResizeVertical,
+            ),
+            (
+                "w",
+                Rect::from_min_max(egui::pos2(l, t + CORNER), egui::pos2(l + EDGE, b - CORNER)),
+                Dir::West,
+                CursorIcon::ResizeHorizontal,
+            ),
+            (
+                "e",
+                Rect::from_min_max(egui::pos2(r - EDGE, t + CORNER), egui::pos2(r, b - CORNER)),
+                Dir::East,
+                CursorIcon::ResizeHorizontal,
+            ),
+            (
+                "nw",
+                Rect::from_min_size(egui::pos2(l, t), Vec2::splat(CORNER)),
+                Dir::NorthWest,
+                CursorIcon::ResizeNwSe,
+            ),
+            (
+                "ne",
+                Rect::from_min_size(egui::pos2(r - CORNER, t), Vec2::splat(CORNER)),
+                Dir::NorthEast,
+                CursorIcon::ResizeNeSw,
+            ),
+            (
+                "sw",
+                Rect::from_min_size(egui::pos2(l, b - CORNER), Vec2::splat(CORNER)),
+                Dir::SouthWest,
+                CursorIcon::ResizeNeSw,
+            ),
+            (
+                "se",
+                Rect::from_min_size(egui::pos2(r - CORNER, b - CORNER), Vec2::splat(CORNER)),
+                Dir::SouthEast,
+                CursorIcon::ResizeNwSe,
+            ),
+        ];
+        for (name, rect, dir, cursor) in grips {
+            let resp = ui.interact(rect, egui::Id::new(("resize_grip", name)), Sense::drag());
+            if resp.hovered() || resp.dragged() {
+                ctx.set_cursor_icon(cursor);
+            }
+            if resp.drag_started() {
+                ctx.send_viewport_cmd(egui::ViewportCommand::BeginResize(dir));
+            }
+        }
+    }
+
+    /// Schaltflächen oben rechts: Datei, Fenster, Vergleich, Sync, Vordergrund, Fenstersteuerung.
     fn draw_menu(&mut self, ctx: &egui::Context) {
         let (mut open, mut new_win, mut help, mut sync) = (false, false, false, false);
         let (mut cmp_toggle, mut cmp_mode) = (false, false);
+        let (mut pin, mut arrange) = (false, false);
+        let (mut minimize, mut maximize, mut close) = (false, false, false);
         let compare_label = self.compare.as_ref().map(|c| c.mode.label());
         let has_a = self.player.is_some();
+        let maximized = Self::is_maximized(ctx);
+        // In schmalen Fenstern nur Icons (der Tooltip nennt die Funktion).
+        let compact = ctx.content_rect().width() < 980.0;
+        let label = |text: &str| {
+            if compact {
+                String::new()
+            } else {
+                text.to_owned()
+            }
+        };
         let sync_label = if self.sync.enabled {
-            format!("Sync · {}", self.sync.synced_peers())
+            label(&format!("Sync · {}", self.sync.synced_peers()))
         } else {
-            "Sync".to_owned()
+            label("Sync")
         };
         egui::Area::new(egui::Id::new("menu"))
             .anchor(Align2::RIGHT_TOP, [-14.0, 14.0])
@@ -671,14 +837,16 @@ impl PlayerApp {
                     ui.spacing_mut().item_spacing.x = 6.0;
                     open = ui::ghost_button(ui, Some(ui::Glyph::Regular(ph::FOLDER_OPEN)), "", false, "Datei öffnen (Strg+O)").clicked();
                     new_win = ui::ghost_button(ui, Some(ui::Glyph::Regular(ph::BROWSERS)), "", false, "Neues Fenster (Strg+N)").clicked();
+                    arrange = ui::ghost_button(ui, Some(ui::Glyph::Regular(ph::SQUARES_FOUR)), "", false, "Alle FrameScope-Fenster gleich groß und lückenlos anordnen (G)").clicked();
+                    pin = ui::ghost_button(ui, Some(ui::Glyph::Regular(ph::PUSH_PIN)), "", self.always_on_top, "Immer im Vordergrund (T)").clicked();
                     help = ui::ghost_button(ui, Some(ui::Glyph::Regular(ph::QUESTION)), "", self.help, "Tastenkürzel (F1)").clicked();
-                    if let Some(label) = compare_label {
+                    if let Some(mode) = compare_label {
                         cmp_mode = ui::ghost_button(
                             ui,
                             Some(ui::Glyph::Regular(ph::ARROWS_LEFT_RIGHT)),
-                            &format!("Modus: {label}"),
+                            &label(&format!("Modus: {mode}")),
                             false,
-                            "Vergleichsmodus wechseln (C): Schieber, Nebeneinander, Überblenden",
+                            &format!("Vergleichsmodus wechseln (C) – aktuell: {mode}"),
                         )
                         .clicked();
                     }
@@ -686,9 +854,9 @@ impl PlayerApp {
                         cmp_toggle = ui::ghost_button(
                             ui,
                             Some(ui::Glyph::Regular(ph::COLUMNS)),
-                            if compare_label.is_some() { "Vergleich beenden" } else { "Vergleichen…" },
+                            &label(if compare_label.is_some() { "Vergleich beenden" } else { "Vergleichen…" }),
                             compare_label.is_some(),
-                            "Zweites Video B zum Vergleich öffnen (Strg+B)",
+                            "Zweites Video B zum Vergleich öffnen / beenden (Strg+B)",
                         )
                         .clicked();
                     }
@@ -700,6 +868,12 @@ impl PlayerApp {
                         "Wiedergabe mit anderen FrameScope-Fenstern synchronisieren (Y, Umschalt+Y: Versatz abgleichen)",
                     )
                     .clicked();
+                    ui.add_space(8.0);
+                    // Fenstersteuerung (das Fenster hat keine Titelleiste).
+                    minimize = ui::ghost_button(ui, Some(ui::Glyph::Regular(ph::MINUS)), "", false, "Minimieren").clicked();
+                    let max_glyph = if maximized { ph::COPY } else { ph::SQUARE };
+                    maximize = ui::ghost_button(ui, Some(ui::Glyph::Regular(max_glyph)), "", false, if maximized { "Wiederherstellen" } else { "Maximieren" }).clicked();
+                    close = ui::ghost_button(ui, Some(ui::Glyph::Regular(ph::X)), "", false, "Schließen").clicked();
                 });
             });
         if open {
@@ -707,6 +881,12 @@ impl PlayerApp {
         }
         if new_win {
             self.new_window();
+        }
+        if arrange {
+            self.arrange_windows(ctx);
+        }
+        if pin {
+            self.set_always_on_top(ctx, !self.always_on_top);
         }
         if help {
             self.help = !self.help;
@@ -725,6 +905,15 @@ impl PlayerApp {
             if let Some(c) = self.compare.as_mut() {
                 c.mode = c.mode.next();
             }
+        }
+        if minimize {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+        }
+        if maximize {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
+        }
+        if close {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
     }
 
@@ -772,6 +961,12 @@ impl PlayerApp {
             ("S  ·  Umschalt + S", "Frame als PNG  ·  Ordner wählen"),
             ("F  ·  Esc", "Vollbild  ·  beenden"),
             ("H", "Info-Overlay (Frame, Timecode, KEY)"),
+            ("Klick ins Bild", "Wiedergabe / Pause"),
+            (
+                "Ziehen im Bild",
+                "Fenster verschieben (Alt + Ziehen: immer)",
+            ),
+            ("T  ·  G", "Immer im Vordergrund  ·  Fenster anordnen"),
             ("Strg + B  ·  C", "Vergleich mit Video B  ·  Modus wechseln"),
             (
                 "Y  ·  Umschalt + Y",
@@ -1198,6 +1393,7 @@ impl eframe::App for PlayerApp {
                 } else {
                     self.draw_placeholder(ui);
                 }
+                self.draw_window_frame(ui, &ctx);
             });
         if controls_visible {
             self.draw_menu(&ctx);
