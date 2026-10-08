@@ -1,0 +1,326 @@
+//! Player-Zustand: Wiedergabeuhr, Frame-Cache, Seeking und Einzelbild-Schritte.
+//!
+//! Die UI fragt pro Frame `poll()` ab; der Decoder-Thread liefert Frames in
+//! Präsentationsreihenfolge. Zeitstempel stammen aus derselben Berechnung wie im
+//! Frame-Index und lassen sich daher exakt vergleichen (Toleranz `EPS`).
+
+use crate::decoder::{Command, DecoderHandle, Event, Frame, VideoInfo};
+use crate::index::FrameIndex;
+use std::collections::VecDeque;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Instant;
+
+const EPS: f64 = 1e-6;
+/// Speicherbudget für den Frame-Cache (rückwärts Schritte ohne neues Decodieren).
+const CACHE_BUDGET: usize = 384 * 1024 * 1024;
+/// So weit (in Frames) darf der Decoder vorwärts „durchlaufen“, bevor ein Seek günstiger ist.
+const MAX_WAIT_FRAMES: usize = 120;
+
+pub struct Player {
+    handle: DecoderHandle,
+    pub info: Option<VideoInfo>,
+    pub index: Option<Arc<FrameIndex>>,
+    /// Keyframe-Positionen als Anteil der Dauer (für die Timeline).
+    pub key_fracs: Vec<f32>,
+    pub playing: bool,
+    pub error: Option<String>,
+    pub current: Option<Arc<Frame>>,
+    serial: u64,
+    base_pos: f64,
+    base_time: Instant,
+    /// Nach einem Seek/Schritt: der erste Frame mit `pts >= target` wird angezeigt.
+    target: Option<f64>,
+    pending: Option<Arc<Frame>>,
+    /// PTS des zuletzt vom Decoder empfangenen Frames.
+    stream_pts: f64,
+    /// PTS des zuletzt über den Decoder-Strom angezeigten Frames.
+    stream_shown: f64,
+    cache: VecDeque<Arc<Frame>>,
+    eof: bool,
+}
+
+impl Player {
+    pub fn new(path: PathBuf, wake: impl Fn() + Send + Sync + Clone + 'static) -> Self {
+        Self {
+            handle: DecoderHandle::spawn(path, wake),
+            info: None,
+            index: None,
+            key_fracs: Vec::new(),
+            playing: true,
+            error: None,
+            current: None,
+            serial: 0,
+            base_pos: 0.0,
+            base_time: Instant::now(),
+            target: Some(f64::NEG_INFINITY),
+            pending: None,
+            stream_pts: f64::NEG_INFINITY,
+            stream_shown: f64::NAN,
+            cache: VecDeque::new(),
+            eof: false,
+        }
+    }
+
+    pub fn fps(&self) -> f64 {
+        self.info.as_ref().map_or(25.0, |i| i.fps)
+    }
+
+    pub fn duration(&self) -> f64 {
+        match (&self.info, &self.index) {
+            (Some(i), _) if i.duration > 0.0 => i.duration,
+            (_, Some(idx)) => idx.last_pts() + 1.0 / self.fps(),
+            _ => 0.0,
+        }
+    }
+
+    /// Aktuelle Wiedergabeposition in Sekunden.
+    pub fn position(&self) -> f64 {
+        if self.playing && self.target.is_none() {
+            self.base_pos + self.base_time.elapsed().as_secs_f64()
+        } else {
+            self.base_pos
+        }
+    }
+
+    /// Nummer des angezeigten Frames (0-basiert), sobald der Index vorliegt.
+    pub fn frame_no(&self) -> Option<usize> {
+        let (idx, cur) = (self.index.as_ref()?, self.current.as_ref()?);
+        Some(idx.frame_at(cur.pts))
+    }
+
+    pub fn frame_count(&self) -> Option<usize> {
+        self.index.as_ref().map(|i| i.len())
+    }
+
+    /// Verarbeitet Decoder-Events. Rückgabe: `true`, wenn sich `current` geändert hat.
+    pub fn poll(&mut self) -> bool {
+        if let Ok(idx) = self.handle.index.try_recv() {
+            self.index = Some(idx);
+        }
+        let mut changed = false;
+        loop {
+            let (frame, fresh) = match self.pending.take() {
+                Some(f) => (f, false),
+                None => match self.handle.events.try_recv() {
+                    Ok(Event::Opened(info)) => {
+                        self.info = Some(info);
+                        continue;
+                    }
+                    Ok(Event::Frame(f)) => (f, true),
+                    Ok(Event::Eof(s)) => {
+                        self.eof |= s == self.serial;
+                        continue;
+                    }
+                    Ok(Event::Error(e)) => {
+                        self.error = Some(e);
+                        break;
+                    }
+                    Err(_) => break,
+                },
+            };
+            if frame.serial != self.serial {
+                continue; // vor einem Seek dekodiert
+            }
+            if fresh {
+                self.stream_pts = frame.pts;
+                self.cache_insert(&frame);
+            }
+            if let Some(t) = self.target {
+                if frame.pts < t {
+                    continue; // nur für den Cache (Prefetch vor dem Ziel)
+                }
+                self.target = None;
+                self.base_pos = frame.pts;
+                self.base_time = Instant::now();
+            } else if !(self.playing && frame.pts <= self.position()) {
+                self.pending = Some(frame);
+                break;
+            }
+            self.stream_shown = frame.pts;
+            self.current = Some(frame);
+            changed = true;
+        }
+        self.fill_key_fracs();
+        // Ende erreicht und letzter Frame angezeigt → stoppen.
+        if self.eof && self.pending.is_none() && self.playing && self.target.is_none() {
+            self.base_pos = self.current.as_ref().map_or(self.base_pos, |c| c.pts);
+            self.playing = false;
+        }
+        changed
+    }
+
+    fn fill_key_fracs(&mut self) {
+        let dur = self.duration();
+        if !self.key_fracs.is_empty() || dur <= 0.0 {
+            return;
+        }
+        if let Some(idx) = &self.index {
+            self.key_fracs = idx.key_times().map(|t| (t / dur) as f32).collect();
+        }
+    }
+
+    fn cache_insert(&mut self, frame: &Arc<Frame>) {
+        if self.cache.iter().any(|f| (f.pts - frame.pts).abs() < EPS) {
+            return;
+        }
+        self.cache.push_back(frame.clone());
+        let cap = self.cache_capacity();
+        while self.cache.len() > cap {
+            self.cache.pop_front();
+        }
+    }
+
+    fn cache_capacity(&self) -> usize {
+        let bytes = self
+            .current
+            .as_ref()
+            .or(self.cache.back())
+            .map_or(1, |f| f.rgba.len().max(1));
+        (CACHE_BUDGET / bytes).clamp(2, 48)
+    }
+
+    fn cached(&self, pts: f64) -> Option<Arc<Frame>> {
+        self.cache
+            .iter()
+            .find(|f| (f.pts - pts).abs() < EPS)
+            .cloned()
+    }
+
+    /// Zeigt `frame` an einem Ziel an, ohne den Decoder-Strom zu berühren.
+    fn show_cached(&mut self, frame: Arc<Frame>) {
+        self.base_pos = frame.pts;
+        self.base_time = Instant::now();
+        self.target = None;
+        self.current = Some(frame);
+    }
+
+    /// Ist der Decoder-Strom direkt hinter dem angezeigten Frame positioniert?
+    fn synced(&self) -> bool {
+        self.current
+            .as_ref()
+            .is_some_and(|c| (c.pts - self.stream_shown).abs() < EPS)
+    }
+
+    /// Springt per Decoder zu `time`; liefert ab `from` alle Frames (Prefetch für den Cache).
+    fn hard_seek(&mut self, time: f64, from: f64) {
+        self.serial += 1;
+        self.target = Some(time - EPS);
+        self.pending = None;
+        self.eof = false;
+        self.stream_pts = from - 1.0;
+        self.base_pos = time;
+        self.base_time = Instant::now();
+        let _ = self.handle.cmd.send(Command::Seek {
+            serial: self.serial,
+            from: from - EPS,
+        });
+    }
+
+    /// Seek auf eine Zeit (z. B. Scrubbing). Mit Index frame-genau.
+    pub fn seek_time(&mut self, time: f64) {
+        let time = time.clamp(0.0, self.duration().max(0.0));
+        let was_playing = self.playing;
+        match self.index.clone() {
+            Some(idx) if !idx.is_empty() => self.goto_frame(idx.frame_at(time)),
+            _ => {
+                let tol = 0.5 / self.fps();
+                self.hard_seek(time - tol, time - tol);
+            }
+        }
+        if was_playing {
+            self.set_playing(true);
+        }
+    }
+
+    /// Zeigt Frame `n` an (aus dem Cache, durch Weiterlaufen des Decoders oder per Seek).
+    pub fn goto_frame(&mut self, n: usize) {
+        let Some(idx) = self.index.clone() else {
+            return;
+        };
+        let Some(t) = idx.pts_of(n.min(idx.len().saturating_sub(1))) else {
+            return;
+        };
+        self.set_playing(false);
+        if let Some(f) = self.cached(t) {
+            self.show_cached(f);
+            return;
+        }
+        // Weiterlaufen lohnt nur, wenn zwischen Decoder-Position und Ziel kein Keyframe liegt
+        // (sonst ist ein Seek zum Keyframe schneller).
+        if self.stream_pts.is_finite() && t > self.stream_pts && !self.eof {
+            let (sf, tf) = (idx.frame_at(self.stream_pts.max(0.0)), idx.frame_at(t));
+            let key_between = idx.next_key(sf).is_some_and(|k| k <= tf);
+            if !key_between && tf - sf <= MAX_WAIT_FRAMES {
+                self.target = Some(t - EPS);
+                self.base_pos = t;
+                return;
+            }
+        }
+        let start = n.saturating_sub(self.cache_capacity() - 1);
+        let from = idx.pts_of(start).unwrap_or(t);
+        self.hard_seek(t, from);
+    }
+
+    /// Einzelbild vor/zurück.
+    pub fn step(&mut self, delta: isize) {
+        let (Some(n), Some(count)) = (self.frame_no(), self.frame_count()) else {
+            return;
+        };
+        let new = n.saturating_add_signed(delta).min(count.saturating_sub(1));
+        self.goto_frame(new);
+    }
+
+    /// `n` Keyframes vor (positiv) bzw. zurück (negativ) springen.
+    pub fn step_key_n(&mut self, n: isize) {
+        let (Some(mut frame), Some(idx)) = (self.frame_no(), self.index.clone()) else {
+            return;
+        };
+        for _ in 0..n.unsigned_abs() {
+            let next = if n > 0 {
+                idx.next_key(frame)
+            } else {
+                idx.prev_key(frame)
+            };
+            match next {
+                Some(k) => frame = k,
+                None => break,
+            }
+        }
+        self.goto_frame(frame);
+    }
+
+    fn at_end(&self) -> bool {
+        match (self.frame_no(), self.frame_count()) {
+            (Some(n), Some(count)) => n + 1 >= count,
+            _ => self.eof && self.pending.is_none(),
+        }
+    }
+
+    pub fn set_playing(&mut self, play: bool) {
+        if play == self.playing {
+            return;
+        }
+        if let (true, true, false, Some(cur)) = (
+            play,
+            self.target.is_none(),
+            self.synced(),
+            self.current.clone(),
+        ) {
+            // Nach Cache-Schritten steht der Decoder woanders → neu ausrichten.
+            self.hard_seek(cur.pts, cur.pts);
+        }
+        self.base_pos = self.position();
+        self.base_time = Instant::now();
+        self.playing = play;
+    }
+
+    pub fn toggle(&mut self) {
+        if !self.playing && self.at_end() {
+            // Am Ende: von vorn beginnen.
+            let t0 = self.index.as_ref().and_then(|i| i.pts_of(0)).unwrap_or(0.0);
+            self.hard_seek(t0, t0);
+        }
+        self.set_playing(!self.playing);
+    }
+}

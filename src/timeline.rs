@@ -1,15 +1,29 @@
-//! Timeline-Widget: Track, Position, Scrubbing per Maus.
+//! Timeline-Widget: Track, Keyframe-Marker, Position, Scrubbing per Maus.
 
-use crate::ui::ACCENT;
+use crate::ui::{ACCENT, KEY};
 use eframe::egui::{self, Color32, Rect, Sense, Vec2};
 
-/// Zeichnet die Timeline. `pos` und Rückgabewert sind Anteile (0..=1);
-/// ein Rückgabewert bedeutet: der Nutzer scrubbt gerade an diese Stelle.
-pub fn show(ui: &mut egui::Ui, width: f32, pos: f32) -> Option<f32> {
-    let (rect, resp) = ui.allocate_exact_size(Vec2::new(width, 22.0), Sense::click_and_drag());
+/// Zeichnet die Timeline. `pos` und `key_fracs` sind Anteile (0..=1); ein
+/// Rückgabewert bedeutet: der Nutzer scrubbt gerade an diese Stelle.
+pub fn show(ui: &mut egui::Ui, width: f32, pos: f32, key_fracs: &[f32]) -> Option<f32> {
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(width, 26.0), Sense::click_and_drag());
     let track = Rect::from_center_size(rect.center(), Vec2::new(rect.width(), 4.0));
     let p = ui.painter();
     p.rect_filled(track, 2.0, Color32::from_white_alpha(36));
+
+    // Keyframe-Marker: höchstens einer pro Pixelspalte.
+    let mut last_x = f32::NEG_INFINITY;
+    for &f in key_fracs {
+        let x = (track.left() + track.width() * f).round();
+        if x - last_x >= 1.0 {
+            let tick = Rect::from_min_max(
+                egui::pos2(x, track.top() - 5.0),
+                egui::pos2(x + 1.0, track.top() - 1.0),
+            );
+            p.rect_filled(tick, 0.0, KEY.gamma_multiply(0.85));
+            last_x = x;
+        }
+    }
 
     let x = track.left() + track.width() * pos.clamp(0.0, 1.0);
     let filled = Rect::from_min_max(track.min, egui::pos2(x, track.max.y));

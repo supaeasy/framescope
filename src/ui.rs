@@ -26,19 +26,6 @@ pub fn apply_theme(ctx: &egui::Context) {
     });
 }
 
-/// `hh:mm:ss.mmm` bzw. `mm:ss.mmm` für Zeiten unter einer Stunde.
-pub fn fmt_time(secs: f64) -> String {
-    let ms_total = (secs.max(0.0) * 1000.0).round() as u64;
-    let (ms, s_total) = (ms_total % 1000, ms_total / 1000);
-    let (s, m_total) = (s_total % 60, s_total / 60);
-    let (m, h) = (m_total % 60, m_total / 60);
-    if h > 0 {
-        format!("{h}:{m:02}:{s:02}.{ms:03}")
-    } else {
-        format!("{m:02}:{s:02}.{ms:03}")
-    }
-}
-
 #[derive(Clone, Copy)]
 pub enum Icon {
     Play,

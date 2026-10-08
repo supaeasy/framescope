@@ -2,6 +2,9 @@
 
 mod app;
 mod decoder;
+mod index;
+mod player;
+mod timecode;
 mod timeline;
 mod ui;
 

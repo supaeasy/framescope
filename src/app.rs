@@ -1,78 +1,15 @@
-//! Anwendungszustand: Player-Uhr, Event-Verarbeitung, Eingabe und Zeichnen.
+//! Anwendungsfenster: Eingabe, Zeichnen von Video, Controls und Overlay.
 
-use crate::decoder::{Command, DecoderHandle, Event, Frame, VideoInfo};
-use crate::{timeline, ui};
+use crate::player::Player;
+use crate::{timecode, timeline, ui};
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use eframe::egui::{
-    self, Align2, Color32, CursorIcon, Key, Modifiers, Rect, Stroke, TextureOptions, Vec2,
+    self, Align2, Color32, CursorIcon, Key, Modifiers, Rect, RichText, Stroke, TextureOptions, Vec2,
 };
 use std::path::PathBuf;
-use std::sync::Arc;
-use std::time::Instant;
 
 /// Wie lange die Controls nach der letzten Mausbewegung sichtbar bleiben.
 const CONTROLS_TIMEOUT: f64 = 2.5;
-
-struct Player {
-    handle: DecoderHandle,
-    info: Option<VideoInfo>,
-    serial: u64,
-    playing: bool,
-    /// Position zum Zeitpunkt `base_time` (die Uhr läuft nur bei `playing`).
-    base_pos: f64,
-    base_time: Instant,
-    /// Nach einem Seek: erster ankommender Frame wird sofort angezeigt.
-    awaiting_frame: bool,
-    pending: Option<Arc<Frame>>,
-    current_pts: f64,
-    current_key: bool,
-    eof: bool,
-}
-
-impl Player {
-    fn position(&self) -> f64 {
-        if self.playing && !self.awaiting_frame {
-            self.base_pos + self.base_time.elapsed().as_secs_f64()
-        } else {
-            self.base_pos
-        }
-    }
-
-    fn duration(&self) -> f64 {
-        self.info.as_ref().map_or(0.0, |i| i.duration)
-    }
-
-    fn seek(&mut self, time: f64) {
-        let time = time.clamp(0.0, self.duration().max(0.0));
-        self.serial += 1;
-        self.base_pos = time;
-        self.base_time = Instant::now();
-        self.awaiting_frame = true;
-        self.pending = None;
-        self.eof = false;
-        let _ = self.handle.cmd.send(Command::Seek {
-            serial: self.serial,
-            time,
-        });
-    }
-
-    fn set_playing(&mut self, play: bool) {
-        if play == self.playing {
-            return;
-        }
-        if play && self.eof && self.pending.is_none() {
-            // Am Ende: von vorn beginnen.
-            self.seek(0.0);
-        }
-        self.base_pos = self.position();
-        self.base_time = Instant::now();
-        self.playing = play;
-    }
-
-    fn toggle(&mut self) {
-        self.set_playing(!self.playing);
-    }
-}
 
 pub struct PlayerApp {
     player: Option<Player>,
@@ -102,7 +39,6 @@ impl PlayerApp {
 
     fn open(&mut self, ctx: &egui::Context, path: PathBuf) {
         let wake_ctx = ctx.clone();
-        let handle = DecoderHandle::spawn(path.clone(), move || wake_ctx.request_repaint());
         self.error = None;
         self.texture = None;
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(format!(
@@ -110,19 +46,7 @@ impl PlayerApp {
             path.file_name()
                 .map_or_else(|| "Video".into(), |n| n.to_string_lossy())
         )));
-        self.player = Some(Player {
-            handle,
-            info: None,
-            serial: 0,
-            playing: true,
-            base_pos: 0.0,
-            base_time: Instant::now(),
-            awaiting_frame: true,
-            pending: None,
-            current_pts: 0.0,
-            current_key: false,
-            eof: false,
-        });
+        self.player = Some(Player::new(path, move || wake_ctx.request_repaint()));
     }
 
     /// Dateidialog in eigenem Thread, damit das Fenster nicht blockiert.
@@ -151,102 +75,82 @@ impl PlayerApp {
         }
     }
 
-    /// Verarbeitet Decoder-Events und wählt den Frame passend zur Uhr.
-    fn pump_events(&mut self, ctx: &egui::Context) {
-        let mut error = None;
-        let mut to_show: Option<Arc<Frame>> = None;
-        if let Some(p) = self.player.as_mut() {
-            loop {
-                let candidate = match p.pending.take() {
-                    Some(f) => f,
-                    None => match p.handle.events.try_recv() {
-                        Ok(Event::Opened(info)) => {
-                            p.info = Some(info);
-                            continue;
-                        }
-                        Ok(Event::Frame(f)) => f,
-                        Ok(Event::Eof(s)) => {
-                            if s == p.serial {
-                                p.eof = true;
-                            }
-                            continue;
-                        }
-                        Ok(Event::Error(e)) => {
-                            error = Some(e);
-                            break;
-                        }
-                        Err(_) => break,
-                    },
-                };
-                if candidate.serial != p.serial {
-                    continue; // veraltet (vor einem Seek dekodiert)
-                }
-                if p.awaiting_frame {
-                    p.awaiting_frame = false;
-                    p.base_pos = candidate.pts;
-                    p.base_time = Instant::now();
-                    to_show = Some(candidate);
-                } else if candidate.pts <= p.position() {
-                    to_show = Some(candidate);
-                } else {
-                    p.pending = Some(candidate);
-                    break;
-                }
-            }
-            if let Some(f) = &to_show {
-                p.current_pts = f.pts;
-                p.current_key = f.key;
-            }
-            // Ende erreicht und letzter Frame angezeigt → stoppen.
-            if p.eof && p.pending.is_none() && p.playing {
-                p.base_pos = p.current_pts;
-                p.playing = false;
-            }
-        }
-        if let Some(e) = error {
-            self.error = Some(e);
-            self.player = None;
-        }
-        if let Some(f) = to_show {
-            let image = egui::ColorImage::from_rgba_unmultiplied([f.width, f.height], &f.rgba);
-            match self.texture.as_mut() {
-                Some(t) => t.set(image, TextureOptions::LINEAR),
-                None => {
-                    self.texture = Some(ctx.load_texture("video", image, TextureOptions::LINEAR))
-                }
-            }
+    fn upload_texture(&mut self, ctx: &egui::Context) {
+        let Some(frame) = self.player.as_ref().and_then(|p| p.current.clone()) else {
+            return;
+        };
+        let image =
+            egui::ColorImage::from_rgba_unmultiplied([frame.width, frame.height], &frame.rgba);
+        match self.texture.as_mut() {
+            Some(t) => t.set(image, TextureOptions::LINEAR),
+            None => self.texture = Some(ctx.load_texture("video", image, TextureOptions::LINEAR)),
         }
     }
 
     fn handle_input(&mut self, ctx: &egui::Context) {
-        let (dropped, open, new_win, space) = ctx.input_mut(|i| {
-            (
-                i.raw
-                    .dropped_files
-                    .iter()
-                    .map(|f| f.path().to_path_buf())
-                    .next(),
-                i.consume_key(Modifiers::COMMAND, Key::O),
-                i.consume_key(Modifiers::COMMAND, Key::N),
-                i.consume_key(Modifiers::NONE, Key::Space),
-            )
+        struct Keys {
+            dropped: Option<PathBuf>,
+            open: bool,
+            new_win: bool,
+            space: bool,
+            key_back: usize,
+            key_fwd: usize,
+            back: usize,
+            fwd: usize,
+        }
+        // Zählt Tastendrücke (inkl. Wiederholungen) und verbraucht sie.
+        fn presses(i: &mut egui::InputState, mods: Modifiers, key: Key) -> usize {
+            let n = i
+                .events
+                .iter()
+                .filter(|e| {
+                    matches!(e, egui::Event::Key { key: k, pressed: true, modifiers: m, .. }
+                        if *k == key && m.shift == mods.shift && !m.command && !m.alt)
+                })
+                .count();
+            while i.consume_key(mods, key) {}
+            n
+        }
+        let k = ctx.input_mut(|i| Keys {
+            dropped: i
+                .raw
+                .dropped_files
+                .iter()
+                .map(|f| f.path().to_path_buf())
+                .next(),
+            open: i.consume_key(Modifiers::COMMAND, Key::O),
+            new_win: i.consume_key(Modifiers::COMMAND, Key::N),
+            space: i.consume_key(Modifiers::NONE, Key::Space),
+            key_back: presses(i, Modifiers::SHIFT, Key::ArrowLeft),
+            key_fwd: presses(i, Modifiers::SHIFT, Key::ArrowRight),
+            back: presses(i, Modifiers::NONE, Key::ArrowLeft),
+            fwd: presses(i, Modifiers::NONE, Key::ArrowRight),
         });
-        if let Some(path) = dropped {
+        if let Some(path) = k.dropped {
             self.open(ctx, path);
         }
-        if open {
+        if k.open {
             self.open_dialog(ctx);
         }
-        if new_win {
+        if k.new_win {
             Self::new_window();
-        }
-        if space {
-            if let Some(p) = self.player.as_mut() {
-                p.toggle();
-            }
         }
         while let Ok(path) = self.open_rx.try_recv() {
             self.open(ctx, path);
+        }
+        if let Some(p) = self.player.as_mut() {
+            if k.space {
+                p.toggle();
+            }
+            // Mehrere Drücke pro UI-Frame werden zusammengefasst (Netto-Schritte).
+            let keys = k.key_fwd as isize - k.key_back as isize;
+            if keys != 0 {
+                p.step_key_n(keys);
+            }
+            let frames = k.fwd as isize - k.back as isize;
+            if frames != 0 {
+                p.step(frames);
+            }
         }
     }
 
@@ -273,17 +177,17 @@ impl PlayerApp {
             ),
         };
         let c = full.center();
-        let err = self.error.is_some();
+        let color = if self.error.is_some() {
+            Color32::from_rgb(0xff, 0x7a, 0x70)
+        } else {
+            ui::TEXT
+        };
         p.text(
             c - Vec2::new(0.0, 14.0),
             Align2::CENTER_CENTER,
             title,
             egui::FontId::proportional(22.0),
-            if err {
-                Color32::from_rgb(0xff, 0x7a, 0x70)
-            } else {
-                ui::TEXT
-            },
+            color,
         );
         p.text(
             c + Vec2::new(0.0, 16.0),
@@ -311,13 +215,10 @@ impl PlayerApp {
                 .show(ui, |ui| {
                     ui.set_width(width - 28.0);
                     let duration = p.duration();
-                    let pos = p
-                        .position()
-                        .min(if duration > 0.0 { duration } else { f64::MAX });
-                    let frac = if duration > 0.0 {
-                        (pos / duration) as f32
-                    } else {
-                        0.0
+                    let cur = p.current.as_ref().map(|f| (f.pts, f.key));
+                    let frac = match cur {
+                        Some((pts, _)) if duration > 0.0 => (pts / duration) as f32,
+                        _ => 0.0,
                     };
                     ui.horizontal(|ui| {
                         let icon = if p.playing {
@@ -328,26 +229,36 @@ impl PlayerApp {
                         if ui::icon_button(ui, icon, 34.0).clicked() {
                             p.toggle();
                         }
-                        let time = format!("{} / {}", ui::fmt_time(pos), ui::fmt_time(duration));
-                        ui.label(egui::RichText::new(time).monospace().size(14.0));
-                        if p.current_key {
+                        let (frame_txt, tc_txt) = frame_texts(p);
+                        ui.label(RichText::new(frame_txt).monospace().size(15.0));
+                        ui.label(
+                            RichText::new(tc_txt)
+                                .monospace()
+                                .size(15.0)
+                                .color(ui::TEXT_DIM),
+                        );
+                        if cur.is_some_and(|(pts, key)| is_key(p, pts, key)) {
                             ui.label(
-                                egui::RichText::new("KEY")
+                                RichText::new(" KEY ")
                                     .monospace()
                                     .size(12.0)
-                                    .color(ui::KEY),
+                                    .color(Color32::BLACK)
+                                    .background_color(ui::KEY),
                             );
                         }
                         if let Some(i) = &p.info {
+                            let keys = p.index.as_ref().map_or(String::new(), |x| {
+                                format!(" · {} Keyframes", x.key_count())
+                            });
                             let text = format!(
-                                "{}×{} · {} · {:.3} fps",
+                                "{}×{} · {} · {:.3} fps{keys}",
                                 i.width, i.height, i.codec, i.fps
                             );
                             ui.with_layout(
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
                                     ui.label(
-                                        egui::RichText::new(text)
+                                        RichText::new(text)
                                             .monospace()
                                             .size(12.0)
                                             .color(ui::TEXT_DIM),
@@ -357,11 +268,33 @@ impl PlayerApp {
                         }
                     });
                     let w = ui.available_width();
-                    if let Some(f) = timeline::show(ui, w, frac) {
-                        p.seek(f64::from(f) * duration);
+                    if let Some(f) = timeline::show(ui, w, frac, &p.key_fracs) {
+                        p.seek_time(f64::from(f) * duration);
                     }
                 });
         });
+    }
+}
+
+/// Keyframe-Status des angezeigten Frames: bevorzugt aus dem Index, sonst Decoder-Flag.
+fn is_key(p: &Player, pts: f64, decoder_flag: bool) -> bool {
+    match &p.index {
+        Some(idx) => idx.is_key(idx.frame_at(pts)),
+        None => decoder_flag,
+    }
+}
+
+/// Texte „F 42 / 600“ und Timecode des aktuellen Frames.
+fn frame_texts(p: &Player) -> (String, String) {
+    let Some(cur) = &p.current else {
+        return ("F – / –".into(), "--:--:--:--".into());
+    };
+    match (&p.index, p.frame_no()) {
+        (Some(idx), Some(n)) => (
+            format!("F {n} / {}", idx.len()),
+            timecode::format(cur.pts, idx.frame_in_second(n)),
+        ),
+        _ => ("F – / –".into(), timecode::format_nominal(cur.pts, p.fps())),
     }
 }
 
@@ -369,7 +302,14 @@ impl eframe::App for PlayerApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.handle_input(&ctx);
-        self.pump_events(&ctx);
+        if let Some(p) = self.player.as_mut() {
+            p.poll();
+            if let Some(e) = p.error.take() {
+                self.error = Some(e);
+                self.player = None;
+            }
+        }
+        self.upload_texture(&ctx);
 
         let (time, moved) = ctx.input(|i| {
             (

@@ -1,6 +1,7 @@
 //! Decoder-Thread: öffnet die Datei, dekodiert Frames (swscale → RGBA) und
 //! liefert sie über einen Channel an die UI. Seeks werden per Command gesendet.
 
+use crate::index::{self, FrameIndex};
 use anyhow::{anyhow, Context as _, Result};
 use crossbeam_channel::{bounded, select, unbounded, Receiver, Sender, TryRecvError};
 use ffmpeg::{format, format::Pixel, media::Type, software::scaling, util::frame::video::Video};
@@ -36,7 +37,8 @@ pub struct Frame {
 }
 
 pub enum Command {
-    Seek { serial: u64, time: f64 },
+    /// Springt zum Keyframe vor `from` und liefert alle Frames ab `from`.
+    Seek { serial: u64, from: f64 },
 }
 
 pub enum Event {
@@ -50,14 +52,28 @@ pub enum Event {
 pub struct DecoderHandle {
     pub cmd: Sender<Command>,
     pub events: Receiver<Event>,
+    /// Frame-Index, sobald der Hintergrund-Scan fertig ist.
+    pub index: Receiver<Arc<FrameIndex>>,
 }
 
 impl DecoderHandle {
     /// Startet den Decoder-Thread. `wake` weckt die UI (Repaint) bei neuen Events.
     /// Das Droppen des Handles beendet den Thread.
-    pub fn spawn(path: PathBuf, wake: impl Fn() + Send + 'static) -> Self {
+    pub fn spawn(path: PathBuf, wake: impl Fn() + Send + Sync + Clone + 'static) -> Self {
         let (cmd_tx, cmd_rx) = unbounded();
         let (ev_tx, ev_rx) = bounded(QUEUE_DEPTH);
+        let (idx_tx, idx_rx) = bounded(1);
+        let (idx_path, idx_wake) = (path.clone(), wake.clone());
+        let scan = thread::Builder::new().name("index".into()).spawn(move || {
+            // Fehler sind hier unkritisch: ohne Index entfallen nur Framecount/Marker.
+            if let Ok(index) = index::scan(&idx_path) {
+                let _ = idx_tx.send(Arc::new(index));
+                idx_wake();
+            }
+        });
+        if scan.is_err() {
+            eprintln!("Index-Thread konnte nicht gestartet werden");
+        }
         let spawned = thread::Builder::new()
             .name("decoder".into())
             .spawn(move || {
@@ -72,6 +88,7 @@ impl DecoderHandle {
         Self {
             cmd: cmd_tx,
             events: ev_rx,
+            index: idx_rx,
         }
     }
 }
@@ -215,6 +232,8 @@ impl Source {
         if !reusable {
             let ctx = scaling::Context::get(fmt, w, h, Pixel::RGBA, w, h, scaling::Flags::BILINEAR)
                 .context("Skalierer konnte nicht erstellt werden")?;
+            let mut ctx = ctx;
+            set_colorspace(&mut ctx, &self.decoded);
             self.scaler = Some((ctx, fmt, w, h));
             self.rgba = Video::new(Pixel::RGBA, w, h);
         }
@@ -246,15 +265,14 @@ struct SeekState {
     serial: u64,
     /// Frames vor dieser Zeit werden nach einem Seek verworfen.
     skip_until: f64,
-    tolerance: f64,
 }
 
 impl SeekState {
     fn apply(&mut self, src: &mut Source, cmd: Command) -> Result<()> {
-        let Command::Seek { serial, time } = cmd;
-        src.seek(time)?;
+        let Command::Seek { serial, from } = cmd;
+        src.seek(from)?;
         self.serial = serial;
-        self.skip_until = time - self.tolerance;
+        self.skip_until = from;
         Ok(())
     }
 }
@@ -269,7 +287,6 @@ fn run(
     let mut st = SeekState {
         serial: 0,
         skip_until: f64::NEG_INFINITY,
-        tolerance: 0.5 / info.fps,
     };
     if ev_tx.send(Event::Opened(info)).is_err() {
         return Ok(());
@@ -324,5 +341,34 @@ fn run(
                 Err(_) => return Ok(()),
             },
         }
+    }
+}
+
+/// Stellt Farbmatrix und Wertebereich der Quelle ein (swscale nimmt sonst BT.601).
+fn set_colorspace(ctx: &mut scaling::Context, frame: &Video) {
+    use ffmpeg::ffi;
+    use ffmpeg::util::color::{Range, Space};
+    let table = match frame.color_space() {
+        Space::BT709 => ffi::SWS_CS_ITU709,
+        Space::BT470BG | Space::SMPTE170M => ffi::SWS_CS_ITU601,
+        Space::SMPTE240M => ffi::SWS_CS_SMPTE240M,
+        Space::BT2020NCL | Space::BT2020CL => ffi::SWS_CS_BT2020,
+        // Unbekannt: HD-Auflösungen sind üblicherweise BT.709.
+        _ if frame.height() >= 720 => ffi::SWS_CS_ITU709,
+        _ => ffi::SWS_CS_ITU601,
+    };
+    let full_range = i32::from(frame.color_range() == Range::JPEG);
+    // SAFETY: `ctx` ist ein gültiger SwsContext; die Koeffiziententabellen sind statisch.
+    unsafe {
+        ffi::sws_setColorspaceDetails(
+            ctx.as_mut_ptr(),
+            ffi::sws_getCoefficients(table),
+            full_range,
+            ffi::sws_getCoefficients(ffi::SWS_CS_DEFAULT),
+            1,
+            0,
+            1 << 16,
+            1 << 16,
+        );
     }
 }

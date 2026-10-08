@@ -17,7 +17,10 @@ fn main() {
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("dll")) {
+        if path
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("dll"))
+        {
             if let Some(name) = path.file_name() {
                 let _ = fs::copy(&path, target_dir.join(name));
             }
