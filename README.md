@@ -159,7 +159,7 @@ Falls `bindgen` die MSVC-Header nicht findet (`stdint.h not found`), die Include
 Portable-ZIP lokal erzeugen (wie im Release-Workflow, inkl. Smoke-Test):
 
 ```powershell
-./scripts/package.ps1 -Version 0.3.0 -FfmpegDir $env:FFMPEG_DIR
+./scripts/package.ps1 -Version 0.4.0 -FfmpegDir $env:FFMPEG_DIR
 ```
 
 Qualitätschecks (wie in der CI):

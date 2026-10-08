@@ -5,6 +5,8 @@ Alle nennenswerten Änderungen an FrameScope. Das Format folgt
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-09
+
 ### Hinzugefügt
 - **Rahmenloses Fenster** ohne Titelleiste: Fenstersteuerung (minimieren, maximieren, schließen) oben rechts, Verschieben per Ziehen im Bild, Größenänderung an den Rändern.
 - **Immer im Vordergrund** (Pin-Button, `T`).
@@ -52,7 +54,8 @@ Erste Version.
 - Dunkle, minimalistische Oberfläche mit ein-/ausblendbaren Controls, Fenster- und EXE-Icon.
 - Korrekte Farbmatrix (BT.601/709/2020) bei der YUV→RGB-Umrechnung.
 
-[Unreleased]: https://github.com/supaeasy/framescope/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/supaeasy/framescope/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/supaeasy/framescope/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/supaeasy/framescope/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/supaeasy/framescope/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/supaeasy/framescope/compare/v0.1.0...v0.2.0
