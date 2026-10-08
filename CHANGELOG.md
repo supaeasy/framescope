@@ -5,6 +5,8 @@ Alle nennenswerten Änderungen an FrameScope. Das Format folgt
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-10-09
+
 ### Behoben
 - **Sync: Start nach Pause.** Folgefenster sprangen beim Start jedes Mal per Seek vor und liefen erst nach 1–2 Sekunden synchron. Jetzt startet ein Fenster, das schon auf dem richtigen Frame steht, sofort ohne Seek, und das führende Fenster kündigt Play ca. 250 ms im Voraus an, damit alle gemeinsam loslaufen (gemessen: 4 Fenster direkt nach Play auf demselben Frame, danach höchstens 1–2 Frames Abstand statt bis zu ~40 Frames).
 - **Ton nach Video-Nachholen.** Wurde das Video ohne Seek auf einen Frame nachgeholt (Decoder läuft vorwärts oder Frame aus dem Cache), blieb der Ton an der alten Stelle; beim Start sprang die Position zurück. Der Ton wird jetzt bei Abweichung über 0,08 s neu ausgerichtet.
@@ -65,7 +67,8 @@ Erste Version.
 - Dunkle, minimalistische Oberfläche mit ein-/ausblendbaren Controls, Fenster- und EXE-Icon.
 - Korrekte Farbmatrix (BT.601/709/2020) bei der YUV→RGB-Umrechnung.
 
-[Unreleased]: https://github.com/supaeasy/framescope/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/supaeasy/framescope/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/supaeasy/framescope/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/supaeasy/framescope/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/supaeasy/framescope/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/supaeasy/framescope/compare/v0.2.0...v0.2.1
