@@ -1,4 +1,6 @@
 /target
 /dist
+# Design-Mockups (Referenz, nicht Teil des Repos)
+/docs/mockups/
 *.log
 framescope.ini

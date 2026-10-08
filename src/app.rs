@@ -12,9 +12,12 @@ use eframe::egui::{
     self, Align2, Color32, CursorIcon, Key, Modifiers, Rect, RichText, Sense, Stroke,
     TextureOptions, Vec2,
 };
+use egui_phosphor::regular as ph;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+/// Höhe der Control-Leiste unten (Verlauf, Timeline, Schaltflächen), in Punkten.
+const CONTROLS_HEIGHT: f32 = 144.0;
 /// Wie lange die Controls nach der letzten Mausbewegung sichtbar bleiben.
 const CONTROLS_TIMEOUT: f64 = 2.5;
 /// Anzeigedauer von Meldungen (Sekunden).
@@ -489,7 +492,7 @@ impl PlayerApp {
 
     fn draw_video(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         let full = ui.max_rect();
-        ui.painter().rect_filled(full, 0.0, Color32::BLACK);
+        ui.painter().rect_filled(full, 0.0, ui::BG);
         let resp = ui.interact(full, egui::Id::new("video_area"), Sense::click_and_drag());
         // Doppelklick auf das Video: Vollbild umschalten.
         if resp.double_clicked() {
@@ -629,7 +632,7 @@ impl PlayerApp {
         };
         let c = full.center();
         let color = if self.error.is_some() {
-            Color32::from_rgb(0xff, 0x7a, 0x70)
+            ui::ERROR
         } else {
             ui::TEXT
         };
@@ -645,79 +648,65 @@ impl PlayerApp {
             Align2::CENTER_CENTER,
             hint,
             egui::FontId::proportional(14.0),
-            ui::TEXT_DIM,
+            ui::N400,
         );
     }
 
-    /// Dezentes Menü oben rechts: Öffnen, neues Fenster, PNG, Vollbild.
+    /// Schaltflächen oben rechts: Öffnen, neues Fenster, Hilfe, Vergleichen, Sync.
     fn draw_menu(&mut self, ctx: &egui::Context) {
-        let (mut open, mut new_win, mut png, mut full, mut help, mut sync) =
-            (false, false, false, false, false, false);
+        let (mut open, mut new_win, mut help, mut sync) = (false, false, false, false);
         let (mut cmp_toggle, mut cmp_mode) = (false, false);
-        let compare_state = self.compare.as_ref().map(|c| c.mode.label());
+        let compare_label = self.compare.as_ref().map(|c| c.mode.label());
         let has_a = self.player.is_some();
-        let has_frame = self.player.as_ref().is_some_and(|p| p.current.is_some());
+        let sync_label = if self.sync.enabled {
+            format!("Sync · {}", self.sync.synced_peers())
+        } else {
+            "Sync".to_owned()
+        };
         egui::Area::new(egui::Id::new("menu"))
             .anchor(Align2::RIGHT_TOP, [-14.0, 14.0])
             .order(egui::Order::Foreground)
             .show(ctx, |ui| {
-                egui::Frame::new()
-                    .fill(ui::PANEL)
-                    .corner_radius(10.0)
-                    .stroke(Stroke::new(1.0, Color32::from_white_alpha(18)))
-                    .inner_margin(egui::Margin::symmetric(6, 4))
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            open = menu_button(ui, "Öffnen", "Datei öffnen (Strg+O)", true);
-                            new_win =
-                                menu_button(ui, "Neues Fenster", "Weitere Instanz (Strg+N)", true);
-                            png = menu_button(
-                                ui,
-                                "PNG",
-                                "Aktuellen Frame als PNG speichern (S, Umschalt+S: Ordner wählen)",
-                                has_frame,
-                            );
-                            full = menu_button(ui, "Vollbild", "Vollbild (F, Esc beendet)", true);
-                            let sync_label = if self.sync.enabled {
-                                format!("Sync · {}", self.sync.synced_peers())
-                            } else {
-                                "Sync".to_owned()
-                            };
-                            sync = menu_button(
-                                ui,
-                                &sync_label,
-                                "Wiedergabe mit anderen FrameScope-Fenstern synchronisieren (Y, Umschalt+Y: Versatz abgleichen)",
-                                true,
-                            );
-                            cmp_toggle = menu_button(
-                                ui,
-                                if compare_state.is_some() { "Vergleich beenden" } else { "Vergleichen…" },
-                                "Zweites Video B zum Vergleich öffnen (Strg+B)",
-                                has_a,
-                            );
-                            if let Some(label) = compare_state {
-                                cmp_mode = menu_button(
-                                    ui,
-                                    &format!("Modus: {label}"),
-                                    "Vergleichsmodus wechseln (C): Schieber, Nebeneinander, Überblenden",
-                                    true,
-                                );
-                            }
-                            help = menu_button(ui, "?", "Tastenkürzel (F1)", true);
-                        });
-                    });
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 6.0;
+                    open = ui::ghost_button(ui, Some(ui::Glyph::Regular(ph::FOLDER_OPEN)), "", false, "Datei öffnen (Strg+O)").clicked();
+                    new_win = ui::ghost_button(ui, Some(ui::Glyph::Regular(ph::BROWSERS)), "", false, "Neues Fenster (Strg+N)").clicked();
+                    help = ui::ghost_button(ui, Some(ui::Glyph::Regular(ph::QUESTION)), "", self.help, "Tastenkürzel (F1)").clicked();
+                    if let Some(label) = compare_label {
+                        cmp_mode = ui::ghost_button(
+                            ui,
+                            Some(ui::Glyph::Regular(ph::ARROWS_LEFT_RIGHT)),
+                            &format!("Modus: {label}"),
+                            false,
+                            "Vergleichsmodus wechseln (C): Schieber, Nebeneinander, Überblenden",
+                        )
+                        .clicked();
+                    }
+                    if has_a {
+                        cmp_toggle = ui::ghost_button(
+                            ui,
+                            Some(ui::Glyph::Regular(ph::COLUMNS)),
+                            if compare_label.is_some() { "Vergleich beenden" } else { "Vergleichen…" },
+                            compare_label.is_some(),
+                            "Zweites Video B zum Vergleich öffnen (Strg+B)",
+                        )
+                        .clicked();
+                    }
+                    sync = ui::ghost_button(
+                        ui,
+                        Some(ui::Glyph::Regular(ph::LINK)),
+                        &sync_label,
+                        self.sync.enabled,
+                        "Wiedergabe mit anderen FrameScope-Fenstern synchronisieren (Y, Umschalt+Y: Versatz abgleichen)",
+                    )
+                    .clicked();
+                });
             });
         if open {
             self.open_dialog(ctx, false);
         }
         if new_win {
             self.new_window();
-        }
-        if png {
-            self.export_png(ctx, false);
-        }
-        if full {
-            self.set_fullscreen(ctx, !self.fullscreen);
         }
         if help {
             self.help = !self.help;
@@ -745,7 +734,7 @@ impl PlayerApp {
             return;
         };
         let Some(cur) = &p.current else { return };
-        let (frame_txt, tc_txt) = frame_texts(p);
+        let (frame_txt, _, tc_txt) = frame_parts(p);
         let key = is_key(p, cur.pts, cur.key);
         egui::Area::new(egui::Id::new("hud"))
             .anchor(Align2::LEFT_TOP, [14.0, 14.0])
@@ -753,26 +742,16 @@ impl PlayerApp {
             .interactable(false)
             .show(ctx, |ui| {
                 egui::Frame::new()
-                    .fill(Color32::from_black_alpha(150))
-                    .corner_radius(8.0)
+                    .fill(ui::alpha(ui::BG, 0.78))
+                    .corner_radius(4.0)
                     .inner_margin(egui::Margin::symmetric(10, 6))
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
-                            ui.label(RichText::new(frame_txt).monospace().size(16.0));
-                            ui.label(
-                                RichText::new(tc_txt)
-                                    .monospace()
-                                    .size(16.0)
-                                    .color(ui::TEXT_DIM),
-                            );
+                            ui.spacing_mut().item_spacing.x = 10.0;
+                            ui.label(RichText::new(frame_txt).size(12.0));
+                            ui.label(RichText::new(tc_txt).size(12.0).color(ui::N300));
                             if key {
-                                ui.label(
-                                    RichText::new(" KEY ")
-                                        .monospace()
-                                        .size(13.0)
-                                        .color(Color32::BLACK)
-                                        .background_color(ui::KEY),
-                                );
+                                ui::tag(ui, "KEY");
                             }
                         });
                     });
@@ -809,9 +788,15 @@ impl PlayerApp {
             .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
             .frame(
                 egui::Frame::new()
-                    .fill(Color32::from_rgb(0x14, 0x15, 0x19))
-                    .corner_radius(12.0)
-                    .stroke(Stroke::new(1.0, Color32::from_white_alpha(24)))
+                    .fill(ui::SURFACE)
+                    .corner_radius(8.0)
+                    .stroke(Stroke::new(1.0, ui::N700))
+                    .shadow(egui::Shadow {
+                        offset: [0, 6],
+                        blur: 18,
+                        spread: 0,
+                        color: Color32::from_black_alpha(140),
+                    })
                     .inner_margin(egui::Margin::same(16)),
             )
             .show(ctx, |ui| {
@@ -820,7 +805,7 @@ impl PlayerApp {
                     .spacing([24.0, 8.0])
                     .show(ui, |ui| {
                         for (keys, what) in ROWS {
-                            ui.label(RichText::new(*keys).monospace().size(13.0).color(ui::KEY));
+                            ui.label(RichText::new(*keys).size(13.0).color(ui::A300));
                             ui.label(RichText::new(*what).size(13.0));
                             ui.end_row();
                         }
@@ -870,191 +855,267 @@ impl PlayerApp {
             return;
         }
         egui::Area::new(egui::Id::new("toast"))
-            .anchor(Align2::LEFT_BOTTOM, [16.0, -118.0])
+            .anchor(Align2::LEFT_BOTTOM, [16.0, -(CONTROLS_HEIGHT + 8.0)])
             .order(egui::Order::Foreground)
             .show(ctx, |ui| {
                 egui::Frame::new()
-                    .fill(ui::PANEL)
+                    .fill(ui::SURFACE)
                     .corner_radius(8.0)
+                    .stroke(Stroke::new(1.0, ui::N700))
                     .inner_margin(egui::Margin::symmetric(12, 8))
                     .show(ui, |ui| {
-                        let color = if error {
-                            Color32::from_rgb(0xff, 0x7a, 0x70)
-                        } else {
-                            ui::TEXT
-                        };
+                        let color = if error { ui::ERROR } else { ui::TEXT };
                         ui.label(RichText::new(text).size(13.0).color(color));
                     });
             });
         ctx.request_repaint_after(std::time::Duration::from_millis(500));
     }
 
+    /// Control-Leiste unten: Verlauf über dem Video, Timeline, Schaltflächen, Zähler.
     fn draw_controls(&mut self, ctx: &egui::Context) {
         let b_txt = self
             .compare
             .as_ref()
             .map(|c| format!("B {}", frame_texts(&c.player).0));
-        let sync_txt = if self.sync.enabled {
-            format!(
-                " · Sync ({}){}",
-                self.sync.synced_peers(),
-                if self.sync.offset == 0.0 {
-                    String::new()
-                } else {
-                    format!(" {:+.3}s", self.sync.offset)
-                }
-            )
-        } else {
-            String::new()
-        };
         let Some(p) = self.player.as_mut() else {
             return;
         };
-        let area = egui::Area::new(egui::Id::new("controls"))
-            .anchor(Align2::CENTER_BOTTOM, [0.0, -14.0])
-            .order(egui::Order::Foreground);
-        area.show(ctx, |ui| {
-            let width = (ctx.content_rect().width() - 40.0).max(200.0);
-            egui::Frame::new()
-                .fill(ui::PANEL)
-                .corner_radius(12.0)
-                .stroke(Stroke::new(1.0, Color32::from_white_alpha(18)))
-                .inner_margin(egui::Margin::symmetric(14, 8))
-                .show(ui, |ui| {
-                    ui.set_width(width - 28.0);
-                    let duration = p.duration();
-                    let cur = p.current.as_ref().map(|f| (f.pts, f.key));
-                    let frac = match cur {
-                        Some((pts, _)) if duration > 0.0 => (pts / duration) as f32,
-                        _ => 0.0,
-                    };
-                    ui.horizontal(|ui| {
-                        let icon = if p.playing {
-                            ui::Icon::Pause
+
+        const PAD_X: f32 = 18.0;
+        const PAD_BOTTOM: f32 = 14.0;
+        const ROW: f32 = 36.0;
+        const TIMELINE: f32 = 22.0;
+        const GAP: f32 = 8.0;
+        let screen = ctx.content_rect();
+        let bar = Rect::from_min_max(
+            egui::pos2(screen.left(), screen.bottom() - CONTROLS_HEIGHT),
+            screen.right_bottom(),
+        );
+        // Verlauf liegt unter den Widgets und fängt keine Mauseingaben ab.
+        let fade = ctx.layer_painter(egui::LayerId::new(
+            egui::Order::Middle,
+            egui::Id::new("controls_fade"),
+        ));
+        ui::fade_up(&fade, bar, ui::BG, 0.94);
+
+        let inner_w = screen.width() - 2.0 * PAD_X;
+        let top_left = egui::pos2(
+            screen.left() + PAD_X,
+            screen.bottom() - PAD_BOTTOM - ROW - GAP - TIMELINE,
+        );
+        let (mut want_png, mut want_fullscreen) = (false, false);
+        let fullscreen = self.fullscreen;
+        let info_tip = p.info.as_ref().map(|i| {
+            let keys = p
+                .index
+                .as_ref()
+                .map_or(String::new(), |x| format!(" · {} Keyframes", x.key_count()));
+            let clock = if p.audio_is_master() {
+                " · Audio-Clock"
+            } else {
+                ""
+            };
+            format!(
+                "{}×{} · {} · {:.3} fps{keys}{clock}",
+                i.width, i.height, i.codec, i.fps
+            )
+        });
+
+        egui::Area::new(egui::Id::new("controls"))
+            .fixed_pos(top_left)
+            .order(egui::Order::Foreground)
+            .show(ctx, |ui| {
+                ui.set_width(inner_w);
+                ui.spacing_mut().item_spacing = egui::vec2(0.0, GAP);
+                let duration = p.duration();
+                let cur = p.current.as_ref().map(|f| (f.pts, f.key));
+                let frac = match cur {
+                    Some((pts, _)) if duration > 0.0 => (pts / duration) as f32,
+                    _ => 0.0,
+                };
+
+                let band = p.loop_band().map(|(start, end)| LoopBand {
+                    start,
+                    end,
+                    active: p.loop_on,
+                });
+                if let Some(f) = timeline::show(ui, inner_w, frac, &p.key_fracs, band) {
+                    p.seek_time(f64::from(f) * duration);
+                }
+
+                ui.allocate_ui_with_layout(
+                    egui::vec2(inner_w, ROW),
+                    egui::Layout::left_to_right(egui::Align::Center),
+                    |ui| {
+                        ui.spacing_mut().item_spacing.x = 4.0;
+                        let play = if p.playing {
+                            ui::Glyph::Fill(egui_phosphor::fill::PAUSE)
                         } else {
-                            ui::Icon::Play
+                            ui::Glyph::Fill(egui_phosphor::fill::PLAY)
                         };
-                        if ui::icon_button(ui, icon, 34.0).clicked() {
+                        if ui::ghost_icon(
+                            ui,
+                            play,
+                            ui::ACCENT,
+                            false,
+                            "Wiedergabe / Pause (Leertaste)",
+                        )
+                        .clicked()
+                        {
                             p.toggle();
                         }
-                        let (frame_txt, tc_txt) = frame_texts(p);
-                        ui.label(RichText::new(frame_txt).monospace().size(15.0));
-                        ui.label(
-                            RichText::new(tc_txt)
-                                .monospace()
-                                .size(15.0)
-                                .color(ui::TEXT_DIM),
+                        if ui::ghost_icon(
+                            ui,
+                            ui::Glyph::Regular(ph::SKIP_BACK),
+                            ui::ACCENT,
+                            false,
+                            "Voriger Keyframe (Umschalt+←)",
+                        )
+                        .clicked()
+                        {
+                            p.step_key_n(-1);
+                        }
+                        if ui::ghost_icon(
+                            ui,
+                            ui::Glyph::Regular(ph::CARET_LEFT),
+                            ui::ACCENT,
+                            false,
+                            "Ein Frame zurück (←)",
+                        )
+                        .clicked()
+                        {
+                            p.step(-1);
+                        }
+                        if ui::ghost_icon(
+                            ui,
+                            ui::Glyph::Regular(ph::CARET_RIGHT),
+                            ui::ACCENT,
+                            false,
+                            "Ein Frame vor (→)",
+                        )
+                        .clicked()
+                        {
+                            p.step(1);
+                        }
+                        if ui::ghost_icon(
+                            ui,
+                            ui::Glyph::Regular(ph::SKIP_FORWARD),
+                            ui::ACCENT,
+                            false,
+                            "Nächster Keyframe (Umschalt+→)",
+                        )
+                        .clicked()
+                        {
+                            p.step_key_n(1);
+                        }
+                        ui.add_space(8.0);
+
+                        // Zähler: „F 3240 / 7200“, Timecode, KEY – mit Tabellenziffern.
+                        let (frame_txt, total_txt, tc_txt) = frame_parts(p);
+                        ui.spacing_mut().item_spacing.x = 6.0;
+                        let counter = ui.add(
+                            egui::Label::new(RichText::new(frame_txt).size(13.0))
+                                .sense(Sense::hover()),
                         );
+                        ui.label(RichText::new(total_txt).size(13.0).color(ui::N400));
+                        ui.add_space(6.0);
+                        ui.label(RichText::new(tc_txt).size(13.0).color(ui::N300));
+                        if let Some(tip) = &info_tip {
+                            counter.on_hover_text(tip);
+                        }
+                        ui.add_space(4.0);
                         if cur.is_some_and(|(pts, key)| is_key(p, pts, key)) {
-                            ui.label(
-                                RichText::new(" KEY ")
-                                    .monospace()
-                                    .size(12.0)
-                                    .color(Color32::BLACK)
-                                    .background_color(ui::KEY),
-                            );
+                            ui::tag(ui, "KEY");
                         }
                         if let Some(b) = &b_txt {
-                            ui.label(RichText::new(b).monospace().size(13.0).color(ui::TEXT_DIM));
+                            ui.add_space(6.0);
+                            ui.label(RichText::new(b).size(12.0).color(ui::N400));
                         }
-                        ui.add_space(6.0);
-                        let loop_btn = ui
-                            .selectable_label(
-                                p.loop_on,
-                                RichText::new("LOOP").monospace().size(12.0),
-                            )
-                            .on_hover_text(
-                                "Loop an/aus (L) · I/O setzen Anfang/Ende · X löscht die Marker",
-                            );
-                        if loop_btn.clicked() {
-                            p.loop_on = !p.loop_on;
-                        }
-                        if p.loop_in.is_some() || p.loop_out.is_some() {
-                            let fmt =
-                                |v: Option<usize>| v.map_or("·".to_owned(), |n| n.to_string());
-                            let text = format!("{} → {}", fmt(p.loop_in), fmt(p.loop_out));
+                        if p.dropped > 0 {
+                            ui.add_space(6.0);
                             ui.label(
-                                RichText::new(text)
-                                    .monospace()
-                                    .size(12.0)
-                                    .color(ui::TEXT_DIM),
+                                RichText::new(format!("{} verworfen", p.dropped))
+                                    .size(11.0)
+                                    .color(ui::ERROR),
                             );
                         }
-                        if p.has_audio() {
-                            let icon = if self.muted || self.volume <= 0.0 {
-                                ui::Icon::SpeakerMuted
-                            } else {
-                                ui::Icon::Speaker
-                            };
-                            if ui::icon_button(ui, icon, 30.0).clicked() {
-                                self.muted = !self.muted;
-                            }
-                            ui.spacing_mut().slider_width = 80.0;
-                            let mut vol = self.volume;
-                            if ui
-                                .add(egui::Slider::new(&mut vol, 0.0..=1.0).show_value(false))
-                                .changed()
-                            {
-                                self.volume = vol;
-                                self.muted = false;
-                            }
-                        }
-                        if let Some(i) = &p.info {
-                            let dropped = if p.dropped > 0 {
-                                format!(" · {} verworfen", p.dropped)
-                            } else {
-                                String::new()
-                            };
-                            let clock = if p.audio_is_master() {
-                                " · Audio-Clock"
-                            } else {
-                                ""
-                            };
-                            let keys = p.index.as_ref().map_or(String::new(), |x| {
-                                format!(" · {} Keyframes", x.key_count())
-                            });
-                            let text = format!(
-                                "{}×{} · {} · {:.3} fps{keys}{clock}{dropped}{sync_txt}",
-                                i.width, i.height, i.codec, i.fps
-                            );
-                            // Bei schmalen Fenstern weglassen, statt andere Bedienelemente zu überlappen.
-                            let needed = text.chars().count() as f32 * 7.6 + 24.0;
-                            if ui.available_width() > needed {
-                                ui.with_layout(
-                                    egui::Layout::right_to_left(egui::Align::Center),
-                                    |ui| {
-                                        ui.label(
-                                            RichText::new(text)
-                                                .monospace()
-                                                .size(12.0)
-                                                .color(ui::TEXT_DIM),
-                                        );
-                                    },
-                                );
-                            }
-                        }
-                    });
-                    let w = ui.available_width();
-                    let band = p.loop_band().map(|(start, end)| LoopBand {
-                        start,
-                        end,
-                        active: p.loop_on,
-                    });
-                    if let Some(f) = timeline::show(ui, w, frac, &p.key_fracs, band) {
-                        p.seek_time(f64::from(f) * duration);
-                    }
-                });
-        });
-    }
-}
 
-fn menu_button(ui: &mut egui::Ui, label: &str, hint: &str, enabled: bool) -> bool {
-    ui.add_enabled(
-        enabled,
-        egui::Button::new(RichText::new(label).size(13.0)).frame(false),
-    )
-    .on_hover_text(hint)
-    .clicked()
+                        // Rechte Gruppe (von rechts nach links).
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.spacing_mut().item_spacing.x = 4.0;
+                            let fs = if fullscreen {
+                                ui::Glyph::Regular(ph::CORNERS_IN)
+                            } else {
+                                ui::Glyph::Regular(ph::CORNERS_OUT)
+                            };
+                            if ui::ghost_icon(ui, fs, ui::ACCENT, false, "Vollbild (F)").clicked() {
+                                want_fullscreen = true;
+                            }
+                            if p.has_audio() {
+                                let mut vol = self.volume;
+                                if ui::volume_bar(ui, &mut vol, self.muted) {
+                                    self.volume = vol;
+                                    self.muted = false;
+                                }
+                                let silent = self.muted || self.volume <= 0.0;
+                                let g = if silent {
+                                    ph::SPEAKER_X
+                                } else {
+                                    ph::SPEAKER_HIGH
+                                };
+                                if ui::ghost_icon(
+                                    ui,
+                                    ui::Glyph::Regular(g),
+                                    ui::ACCENT,
+                                    false,
+                                    "Stumm (M) · Lautstärke ↑/↓",
+                                )
+                                .clicked()
+                                {
+                                    self.muted = !self.muted;
+                                }
+                            }
+                            if ui::ghost_icon(
+                                ui,
+                                ui::Glyph::Regular(ph::CAMERA),
+                                ui::ACCENT,
+                                false,
+                                "Frame als PNG speichern (S, Umschalt+S: Ordner wählen)",
+                            )
+                            .clicked()
+                            {
+                                want_png = true;
+                            }
+                            let loop_color = if p.loop_on { ui::A300 } else { ui::ACCENT };
+                            if ui::ghost_icon(
+                                ui,
+                                ui::Glyph::Regular(ph::REPEAT),
+                                loop_color,
+                                p.loop_on,
+                                "Loop an/aus (L) · I/O setzen Anfang/Ende · X löscht die Marker",
+                            )
+                            .clicked()
+                            {
+                                p.loop_on = !p.loop_on;
+                            }
+                            if p.loop_in.is_some() || p.loop_out.is_some() {
+                                let fmt =
+                                    |v: Option<usize>| v.map_or(String::new(), |n| n.to_string());
+                                let text = format!("Loop {}–{}", fmt(p.loop_in), fmt(p.loop_out));
+                                ui.add_space(6.0);
+                                ui.label(RichText::new(text).size(12.0).color(ui::N400));
+                            }
+                        });
+                    },
+                );
+            });
+        if want_png {
+            self.export_png(ctx, false);
+        }
+        if want_fullscreen {
+            self.set_fullscreen(ctx, !fullscreen);
+        }
+    }
 }
 
 /// Keyframe-Status des angezeigten Frames: bevorzugt aus dem Index, sonst Decoder-Flag.
@@ -1062,6 +1123,25 @@ fn is_key(p: &Player, pts: f64, decoder_flag: bool) -> bool {
     match &p.index {
         Some(idx) => idx.is_key(idx.frame_at(pts)),
         None => decoder_flag,
+    }
+}
+
+/// „F 42“, „/ 600“ und Timecode des aktuellen Frames (Teile einzeln, für die Zähler-Anzeige).
+fn frame_parts(p: &Player) -> (String, String, String) {
+    let Some(cur) = &p.current else {
+        return ("F –".into(), "/ –".into(), "--:--:--:--".into());
+    };
+    match (&p.index, p.frame_no()) {
+        (Some(idx), Some(n)) => (
+            format!("F {n}"),
+            format!("/ {}", idx.len()),
+            timecode::format(cur.pts, idx.frame_in_second(n)),
+        ),
+        _ => (
+            "F –".into(),
+            "/ –".into(),
+            timecode::format_nominal(cur.pts, p.fps()),
+        ),
     }
 }
 
@@ -1111,7 +1191,7 @@ impl eframe::App for PlayerApp {
             !playing || self.player.is_none() || time - self.last_activity < CONTROLS_TIMEOUT;
 
         egui::CentralPanel::default()
-            .frame(egui::Frame::new().fill(Color32::BLACK))
+            .frame(egui::Frame::new().fill(ui::BG))
             .show(ui, |ui| {
                 if self.texture.is_some() {
                     self.draw_video(ui, &ctx);
@@ -1185,9 +1265,9 @@ fn file_label(path: &std::path::Path) -> String {
 /// Kleine halbtransparente Beschriftung (A/B-Label im Vergleich).
 fn chip(painter: &egui::Painter, pos: egui::Pos2, anchor: Align2, text: &str) {
     let galley =
-        painter.layout_no_wrap(text.to_owned(), egui::FontId::proportional(13.0), ui::TEXT);
-    let size = galley.size() + Vec2::new(14.0, 8.0);
+        painter.layout_no_wrap(text.to_owned(), egui::FontId::proportional(12.0), ui::N200);
+    let size = galley.size() + Vec2::new(16.0, 8.0);
     let rect = anchor.anchor_size(pos, size);
-    painter.rect_filled(rect, 6.0, Color32::from_black_alpha(150));
-    painter.galley(rect.min + Vec2::new(7.0, 4.0), galley, ui::TEXT);
+    painter.rect_filled(rect, 4.0, ui::alpha(ui::BG, 0.78));
+    painter.galley(rect.min + Vec2::new(8.0, 4.0), galley, ui::N200);
 }

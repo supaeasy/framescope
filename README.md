@@ -3,8 +3,9 @@
 Schlanker, portabler Videoplayer für Windows 11 mit Fokus auf **frame-genaue Analyse und Vergleich** –
 geschrieben in Rust. Kein Installer, keine Registry-Einträge, keine Daten in `%APPDATA%`: ZIP entpacken und starten.
 
-![Screenshot: Wiedergabe mit Controls](docs/screenshots/player.png)
-<!-- Screenshots-Platzhalter: docs/screenshots/player.png, compare.png, loop.png -->
+![Screenshot: Wiedergabe mit Loop-Bereich und Info-Overlay](docs/screenshots/player.png)
+
+![Screenshot: A/B-Vergleich mit Schieber](docs/screenshots/compare.png)
 
 ## Features
 
@@ -19,7 +20,7 @@ geschrieben in Rust. Kein Installer, keine Registry-Einträge, keine Daten in `%
 - **Mehrere Instanzen** zum Vergleichen: jedes Fenster ist ein eigener Prozess (`Strg+N`)
 - **A/B-Vergleich** zweier Videos in einem Fenster: Schieber über dem Bild, Nebeneinander, Überblenden
 - **Synchronisierte Wiedergabe** mehrerer Fenster (Play, Pause, Seek, Einzelbild, Loop-Sprünge)
-- **Portable** und **Dark-UI**: Controls blenden sich bei Inaktivität aus, Video im Vordergrund
+- **Portable** und **Dark-UI** („Nocturne“): Controls blenden sich bei Inaktivität aus, Video im Vordergrund
 
 ## Bedienung
 

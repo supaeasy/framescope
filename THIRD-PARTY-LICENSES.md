@@ -26,6 +26,7 @@ FFmpeg ist eine Marke von Fabrice Bellard, siehe <https://ffmpeg.org/legal.html>
 | `cpal` | Apache-2.0 |
 | `ffmpeg-next`, `ffmpeg-sys-next` | WTFPL |
 | `image` (PNG) | MIT OR Apache-2.0 |
+| `egui-phosphor` (Phosphor-Icons, eingebettet) | MIT OR Apache-2.0 (Icons: MIT) |
 | `rfd` | MIT |
 | `crossbeam-channel` | MIT OR Apache-2.0 |
 | `anyhow` | MIT OR Apache-2.0 |
@@ -34,7 +35,12 @@ FFmpeg ist eine Marke von Fabrice Bellard, siehe <https://ffmpeg.org/legal.html>
 Die transitiven Abhängigkeiten stehen unter vergleichbaren permissiven Lizenzen (MIT, Apache-2.0, BSD, Zlib, ISC,
 Unicode). Eine vollständige Liste erzeugt z. B. `cargo install cargo-license && cargo license`.
 
-## Schriften
+## Schriften und Icons
+
+- **Inter** (Medium, Latin-Teilmenge mit tabellarischen Ziffern, `assets/fonts/Inter-Medium-Tabular.otf`) –
+  Copyright © 2016–2020 The Inter Project Authors, **SIL Open Font License 1.1**. Der Lizenztext liegt dem
+  Release-ZIP als `licenses/Inter-OFL.txt` bei; das Ableitungsskript steht in `assets/fonts/make_font.py`.
+- **Phosphor Icons** (über die Crate `egui-phosphor`) – MIT-Lizenz, <https://phosphoricons.com>.
 
 egui bringt die Schriften *Hack*, *Ubuntu-Light*, *NotoEmoji* und *emoji-icon-font* mit
 (Lizenzen: MIT/Bitstream Vera, Ubuntu Font Licence, SIL OFL 1.1, OFL/Apache-2.0).

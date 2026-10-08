@@ -35,6 +35,7 @@ foreach ($f in "README.md", "LICENSE", "CHANGELOG.md", "THIRD-PARTY-LICENSES.md"
 $ffLicense = Join-Path $FfmpegDir "LICENSE.txt"
 if (-not (Test-Path $ffLicense)) { throw "FFmpeg-LICENSE.txt fehlt in $FfmpegDir" }
 Copy-Item $ffLicense (Join-Path $stage "licenses/FFmpeg-LICENSE.txt")
+Copy-Item "assets/fonts/Inter-OFL.txt" (Join-Path $stage "licenses/Inter-OFL.txt")
 
 $zip = Join-Path $OutDir "$name.zip"
 if (Test-Path $zip) { Remove-Item -LiteralPath $zip -Force }

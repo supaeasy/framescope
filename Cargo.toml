@@ -15,6 +15,7 @@ rfd = "0.17"
 cpal = "0.18"
 image = { version = "0.25", default-features = false, features = ["png"] }
 bytemuck = "1"
+egui-phosphor = { version = "0.14", features = ["regular", "fill"] }
 
 [profile.release]
 lto = true

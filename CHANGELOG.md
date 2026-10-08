@@ -5,6 +5,9 @@ Alle nennenswerten Änderungen an FrameScope. Das Format folgt
 
 ## [Unreleased]
 
+### Geändert
+- **Neues Design „Nocturne“** nach den Mockups: blaugraue Oberfläche mit violettem Akzent (nur für Abspielkopf, Loop-Bereich und KEY), Schrift Inter mit tabellarischen Ziffern, Phosphor-Icons, durchgehende Control-Leiste mit Verlauf statt schwebender Karte, Frame-Schritte und Keyframe-Sprünge als Buttons, Kamera- und Vollbild-Button in der Leiste, Info-Overlay (`H`) im neuen Stil. Infos zu Auflösung/Codec/Keyframes stehen jetzt im Tooltip des Frame-Zählers.
+
 ## [0.2.1] - 2026-10-08
 
 ### Geändert
