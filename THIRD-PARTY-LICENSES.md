@@ -3,7 +3,7 @@
 ## FFmpeg (LGPL v2.1 oder neuer)
 
 FrameScope verwendet die Bibliotheken von [FFmpeg](https://ffmpeg.org/) (`libavcodec`, `libavformat`, `libavutil`,
-`libswscale`, `libswresample`; im Release-ZIP zusätzlich `libavdevice` und `libavfilter`).
+`libswscale`, `libswresample`; im Release-ZIP liegen nur diese fünf DLLs bei).
 
 - Die DLLs im Release-ZIP stammen **unverändert** aus den **LGPL-Shared-Builds** von
   [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds) (`win64-lgpl-shared`, FFmpeg 9.0). Diese Builds

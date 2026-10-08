@@ -90,6 +90,12 @@ Falls `bindgen` die MSVC-Header nicht findet (`stdint.h not found`), die Include
 
 `build.rs` kopiert die FFmpeg-DLLs aus `%FFMPEG_DIR%\bin` neben die EXE (`target\release\`), damit sie direkt startet.
 
+Portable-ZIP lokal erzeugen (wie im Release-Workflow, inkl. Smoke-Test):
+
+```powershell
+./scripts/package.ps1 -Version 0.1.0 -FfmpegDir $env:FFMPEG_DIR
+```
+
 Qualitätschecks (wie in der CI):
 
 ```powershell
@@ -97,6 +103,23 @@ cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 cargo test
 ```
+
+## Performance
+
+Gemessen auf einem 16-Thread-Desktop (Software-Decoding, Texturupload als RGBA, Hardware-Decoding ist noch nicht eingebaut):
+
+| Material | Ergebnis über 8 s Wiedergabe |
+|---|---|
+| 1080p30 H.264 | 240 Frames angezeigt, 0 verworfen |
+| 1080p60 H.264 | 480 Frames angezeigt, 0 verworfen |
+| 4K30 H.264 | 240 Frames angezeigt, 0 verworfen, ca. 0,5 CPU-Kerne |
+
+Der Decoder schafft deutlich mehr als nötig (z. B. 4K: ~100 Frames/s inkl. RGBA-Konvertierung). Die Infozeile zeigt
+„N verworfen“, falls Frames zu spät kommen. Mögliche spätere Optimierungen: YUV-Upload mit Shader, D3D11VA.
+
+Entwickler-Hilfen: `framescope.exe --version`, `--bench <datei>` (Decoder-Durchsatz und Index, ohne Fenster),
+`--audio-selftest <datei>` (Drift der Audio-Clock) sowie die Umgebungsvariable `FRAMESCOPE_BENCH=<sekunden>`
+(schreibt `framescope-bench.txt` neben die EXE und beendet das Programm).
 
 ## Projektstruktur
 

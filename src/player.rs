@@ -14,13 +14,16 @@ use std::time::Instant;
 
 const EPS: f64 = 1e-6;
 /// Speicherbudget für den Frame-Cache (rückwärts Schritte ohne neues Decodieren).
-const CACHE_BUDGET: usize = 384 * 1024 * 1024;
+const CACHE_BUDGET: usize = 256 * 1024 * 1024;
 /// So weit (in Frames) darf der Decoder vorwärts „durchlaufen“, bevor ein Seek günstiger ist.
 const MAX_WAIT_FRAMES: usize = 120;
 
 pub struct Player {
     handle: DecoderHandle,
     pub path: PathBuf,
+    /// Angezeigte und verworfene (zu spät dekodierte) Frames, für die Performance-Anzeige.
+    pub shown: u64,
+    pub dropped: u64,
     /// Loop-Bereich (Frame-Nummern, inklusive) und Schalter.
     pub loop_in: Option<usize>,
     pub loop_out: Option<usize>,
@@ -60,6 +63,8 @@ impl Player {
         Self {
             handle: DecoderHandle::spawn(path.clone(), wake),
             path,
+            shown: 0,
+            dropped: 0,
             loop_in: None,
             loop_out: None,
             loop_on: false,
@@ -124,7 +129,7 @@ impl Player {
         if let Ok(idx) = self.handle.index.try_recv() {
             self.index = Some(idx);
         }
-        let mut changed = false;
+        let mut assigned = 0u64;
         loop {
             let (frame, fresh) = match self.pending.take() {
                 Some(f) => (f, false),
@@ -172,8 +177,12 @@ impl Player {
             }
             self.stream_shown = frame.pts;
             self.current = Some(frame);
-            changed = true;
+            assigned += 1;
         }
+        // Mehrere Frames in einem Durchlauf: nur der letzte wird tatsächlich gezeichnet.
+        let changed = assigned > 0;
+        self.shown += assigned.min(1);
+        self.dropped += assigned.saturating_sub(1);
         self.fill_key_fracs();
         self.sync_audio();
         // Ende erreicht und letzter Frame angezeigt → stoppen.

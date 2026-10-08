@@ -372,3 +372,31 @@ fn set_colorspace(ctx: &mut scaling::Context, frame: &Video) {
         );
     }
 }
+
+/// Entwickler-Benchmark (`framescope --bench <datei>`): dekodiert und konvertiert bis zu
+/// 5 s lang so schnell wie möglich und baut den Frame-Index. Kein Fenster, kein Ton.
+pub fn bench(path: &Path) -> Result<()> {
+    let started = std::time::Instant::now();
+    let index = crate::index::scan(path)?;
+    let scan_time = started.elapsed();
+    let (mut src, info) = Source::open(path)?;
+    let (mut frames, mut keys) = (0u64, 0u64);
+    let started = std::time::Instant::now();
+    while started.elapsed() < std::time::Duration::from_secs(5) {
+        let Some((_, key)) = src.next_frame()? else {
+            break;
+        };
+        src.convert_rgba()?;
+        frames += 1;
+        keys += u64::from(key);
+    }
+    let secs = started.elapsed().as_secs_f64();
+    println!(
+        "{} | {}x{} {} {:.3} fps | Index: {} Frames, {} Keyframes in {:.2}s | Decode+RGBA: {} Frames in {:.2}s = {:.1} fps ({} Keyframes)",
+        path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned()),
+        info.width, info.height, info.codec, info.fps,
+        index.len(), index.key_count(), scan_time.as_secs_f64(),
+        frames, secs, frames as f64 / secs, keys
+    );
+    Ok(())
+}

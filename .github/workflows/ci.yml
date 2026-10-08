@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: ./.github/actions/setup-ffmpeg
+
+      - name: Format
+        run: cargo fmt --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Tests
+        run: cargo test
+
+      - name: Release-Build
+        run: cargo build --release
+
+      - name: Smoke-Test (EXE startet mit DLLs)
+        shell: pwsh
+        run: ./target/release/framescope.exe --version; if ($LASTEXITCODE -ne 0) { throw "Exit-Code $LASTEXITCODE" }

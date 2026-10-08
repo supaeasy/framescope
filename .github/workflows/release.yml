@@ -1,0 +1,80 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: ./.github/actions/setup-ffmpeg
+        id: ffmpeg
+
+      - name: Version aus Tag und Cargo.toml pruefen
+        id: ver
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $version = $tag.TrimStart('v')
+          $cargo = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"' | Select-Object -First 1).Matches[0].Groups[1].Value
+          # Tag darf eine Vorabversion der Cargo-Version sein (v0.1.0-rc.1 fuer 0.1.0).
+          if ($version -ne $cargo -and -not $version.StartsWith("$cargo-")) {
+            throw "Tag '$tag' passt nicht zur Cargo-Version '$cargo'"
+          }
+          "version=$version" | Out-File -Append -Encoding utf8 $env:GITHUB_OUTPUT
+          "base=$cargo" | Out-File -Append -Encoding utf8 $env:GITHUB_OUTPUT
+          $pre = if ($version.Contains('-')) { "true" } else { "false" }
+          "prerelease=$pre" | Out-File -Append -Encoding utf8 $env:GITHUB_OUTPUT
+
+      - name: Qualitaetschecks
+        run: |
+          cargo fmt --check
+          cargo clippy --all-targets -- -D warnings
+          cargo test
+
+      - name: Release-Build
+        run: cargo build --release
+
+      - name: Portable-ZIP packen
+        id: pack
+        shell: pwsh
+        run: ./scripts/package.ps1 -Version "${{ steps.ver.outputs.version }}" -FfmpegDir "${{ steps.ffmpeg.outputs.ffmpeg-dir }}"
+
+      - name: Changelog-Auszug
+        shell: pwsh
+        run: |
+          $base = "${{ steps.ver.outputs.base }}"
+          $lines = Get-Content CHANGELOG.md
+          $out = @(); $in = $false
+          foreach ($l in $lines) {
+            if ($l -match '^## \[') {
+              if ($in) { break }
+              if ($l -match [regex]::Escape("[$base]")) { $in = $true; continue }
+            }
+            elseif ($in -and $l -notmatch '^\[[^\]]+\]:') { $out += $l }
+          }
+          $notes = ($out -join "`n").Trim()
+          if (-not $notes) { throw "Kein CHANGELOG-Abschnitt fuer [$base] gefunden" }
+          $sha = (Get-Content "${{ steps.pack.outputs.sha }}").Split(' ')[0]
+          $notes += "`n`n**SHA256** des ZIP: ``$sha``"
+          $notes | Out-File -Encoding utf8 release-notes.md
+
+      - name: GitHub Release anlegen
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $args = @("release", "create", "${{ github.ref_name }}", "${{ steps.pack.outputs.zip }}", "${{ steps.pack.outputs.sha }}",
+                    "--title", "FrameScope ${{ github.ref_name }}", "--notes-file", "release-notes.md", "--verify-tag")
+          if ("${{ steps.ver.outputs.prerelease }}" -eq "true") { $args += "--prerelease" }
+          gh @args

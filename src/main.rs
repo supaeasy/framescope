@@ -18,7 +18,23 @@ fn main() -> anyhow::Result<()> {
     ffmpeg_next::util::log::set_level(ffmpeg_next::util::log::Level::Error);
 
     let mut args = std::env::args_os().skip(1);
-    if args.next().is_some_and(|a| a == "--audio-selftest") {
+    let first = args.next();
+    if first
+        .as_ref()
+        .is_some_and(|a| a == "--version" || a == "-V")
+    {
+        // Dient auch als Smoke-Test: startet nur, wenn alle DLLs geladen werden konnten.
+        println!("framescope {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
+    if first.as_ref().is_some_and(|a| a == "--bench") {
+        let path = args
+            .next()
+            .map(PathBuf::from)
+            .ok_or_else(|| anyhow::anyhow!("Datei fehlt"))?;
+        return decoder::bench(&path);
+    }
+    if first.is_some_and(|a| a == "--audio-selftest") {
         let path = args
             .next()
             .map(PathBuf::from)

@@ -1,0 +1,49 @@
+name: Setup FFmpeg (LGPL, shared) + Build-Umgebung
+description: >
+  Laedt den FFmpeg-9.0-LGPL-Shared-Build (Header, Libs, DLLs), richtet libclang fuer bindgen
+  und die MSVC-Umgebung ein und exportiert FFMPEG_DIR, LIBCLANG_PATH und BINDGEN_EXTRA_CLANG_ARGS.
+
+inputs:
+  ffmpeg-url:
+    description: URL des FFmpeg-Zips (BtbN/FFmpeg-Builds, win64-lgpl-shared)
+    default: https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n9.0-latest-win64-lgpl-shared-9.0.zip
+
+outputs:
+  ffmpeg-dir:
+    description: Entpackter FFmpeg-Ordner (enthaelt bin, lib, include, LICENSE.txt)
+    value: ${{ steps.ffmpeg.outputs.dir }}
+
+runs:
+  using: composite
+  steps:
+    - name: MSVC-Umgebung (INCLUDE/LIB fuer bindgen und Linker)
+      uses: ilammy/msvc-dev-cmd@v1
+      with:
+        arch: x64
+
+    - name: FFmpeg herunterladen
+      id: ffmpeg
+      shell: pwsh
+      run: |
+        $zip = Join-Path $env:RUNNER_TEMP "ffmpeg.zip"
+        $dest = Join-Path $env:RUNNER_TEMP "ffmpeg"
+        for ($i = 1; $i -le 3; $i++) {
+          try { Invoke-WebRequest -Uri "${{ inputs.ffmpeg-url }}" -OutFile $zip -ErrorAction Stop; break }
+          catch { if ($i -eq 3) { throw }; Start-Sleep -Seconds (5 * $i) }
+        }
+        Expand-Archive $zip $dest -Force
+        $dir = (Get-ChildItem $dest -Directory | Select-Object -First 1).FullName
+        if (-not (Test-Path (Join-Path $dir "include/libavcodec/avcodec.h"))) { throw "FFmpeg-Dev-Dateien fehlen in $dir" }
+        "FFMPEG_DIR=$dir" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+        "$dir\bin" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+        "dir=$dir" | Out-File -Append -Encoding utf8 $env:GITHUB_OUTPUT
+
+    - name: libclang und bindgen-Includes
+      shell: pwsh
+      run: |
+        $llvm = "C:\Program Files\LLVM\bin"
+        if (-not (Test-Path (Join-Path $llvm "libclang.dll"))) { throw "libclang.dll nicht gefunden in $llvm" }
+        "LIBCLANG_PATH=$llvm" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+        # clang findet die MSVC-/SDK-Header sonst nicht ('stdint.h not found').
+        $args = ($env:INCLUDE -split ';' | Where-Object { $_ } | ForEach-Object { "-I`"$_`"" }) -join ' '
+        "BINDGEN_EXTRA_CLANG_ARGS=$args" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV

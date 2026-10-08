@@ -41,6 +41,8 @@ pub struct PlayerApp {
     toast: Option<(String, bool, f64)>,
     msg_tx: Sender<Msg>,
     msg_rx: Receiver<Msg>,
+    /// Entwickler-Benchmark: nach N Sekunden Statistik schreiben und beenden.
+    bench: Option<(f64, f64)>,
 }
 
 impl PlayerApp {
@@ -62,6 +64,10 @@ impl PlayerApp {
             toast: None,
             msg_tx,
             msg_rx,
+            bench: std::env::var("FRAMESCOPE_BENCH")
+                .ok()
+                .and_then(|v| v.parse::<f64>().ok())
+                .map(|secs| (secs, -1.0)),
         };
         if let Some(path) = initial {
             app.open(&cc.egui_ctx, path);
@@ -172,8 +178,9 @@ impl PlayerApp {
         let Some(frame) = self.player.as_ref().and_then(|p| p.current.clone()) else {
             return;
         };
-        let image =
-            egui::ColorImage::from_rgba_unmultiplied([frame.width, frame.height], &frame.rgba);
+        // RGBA ist opak (Alpha 255) → unmultiplied == premultiplied, direkter Cast ohne Pixelschleife.
+        let pixels: Vec<Color32> = bytemuck::cast_slice(&frame.rgba).to_vec();
+        let image = egui::ColorImage::new([frame.width, frame.height], pixels);
         match self.texture.as_mut() {
             Some(t) => t.set(image, TextureOptions::LINEAR),
             None => self.texture = Some(ctx.load_texture("video", image, TextureOptions::LINEAR)),
@@ -507,6 +514,37 @@ impl PlayerApp {
         self.help = open;
     }
 
+    /// Entwickler-Benchmark (`FRAMESCOPE_BENCH=<sekunden>`): schreibt `framescope-bench.txt`
+    /// neben die EXE und beendet das Programm.
+    fn bench_tick(&mut self, ctx: &egui::Context, time: f64) {
+        let Some((secs, start)) = self.bench.as_mut() else {
+            return;
+        };
+        let Some(p) = self.player.as_ref() else {
+            return;
+        };
+        if p.current.is_none() {
+            return;
+        }
+        if *start < 0.0 {
+            *start = time;
+        }
+        if time - *start >= *secs {
+            let text = format!(
+                "shown={} dropped={} wall={:.2}s position={:.2}s
+",
+                p.shown,
+                p.dropped,
+                time - *start,
+                p.position()
+            );
+            if let Ok(exe) = std::env::current_exe() {
+                let _ = std::fs::write(exe.with_file_name("framescope-bench.txt"), text);
+            }
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+    }
+
     fn draw_toast(&mut self, ctx: &egui::Context) {
         let now = ctx.input(|i| i.time);
         let Some((text, error, until)) = self.toast.clone() else {
@@ -627,6 +665,11 @@ impl PlayerApp {
                             }
                         }
                         if let Some(i) = &p.info {
+                            let dropped = if p.dropped > 0 {
+                                format!(" · {} verworfen", p.dropped)
+                            } else {
+                                String::new()
+                            };
                             let clock = if p.audio_is_master() {
                                 " · Audio-Clock"
                             } else {
@@ -636,7 +679,7 @@ impl PlayerApp {
                                 format!(" · {} Keyframes", x.key_count())
                             });
                             let text = format!(
-                                "{}×{} · {} · {:.3} fps{keys}{clock}",
+                                "{}×{} · {} · {:.3} fps{keys}{clock}{dropped}",
                                 i.width, i.height, i.codec, i.fps
                             );
                             ui.with_layout(
@@ -743,6 +786,7 @@ impl eframe::App for PlayerApp {
         }
         self.draw_help(&ctx);
         self.draw_toast(&ctx);
+        self.bench_tick(&ctx, time);
 
         if playing {
             ctx.request_repaint();
