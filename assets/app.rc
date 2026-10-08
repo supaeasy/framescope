@@ -21,7 +21,7 @@ BEGIN
             VALUE "OriginalFilename", "framescope.exe"
             VALUE "ProductName", "FrameScope"
             VALUE "ProductVersion", VER_STR
-            VALUE "LegalCopyright", "MIT License"
+            VALUE "LegalCopyright", "Copyright (c) 2026 supaeasy - Verkauf nur mit Genehmigung (siehe LICENSE)"
         END
     END
     BLOCK "VarFileInfo"

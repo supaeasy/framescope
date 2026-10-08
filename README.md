@@ -182,6 +182,16 @@ Details und Entscheidungen: [docs/PLAN.md](docs/PLAN.md).
 
 ## Lizenz
 
-FrameScope steht unter der [MIT-Lizenz](LICENSE).
+FrameScope steht unter der [FrameScope License (No Sale Without Permission)](LICENSE) – maßgeblich ist der englische
+Lizenztext. Kurzfassung (unverbindlich):
+
+- **Erlaubt:** nutzen (auch beruflich/kommerziell, z. B. um Videos zu analysieren), kopieren, verändern, weitergeben.
+- **Nur mit vorheriger schriftlicher Genehmigung:** die Software oder abgeleitete Versionen **verkaufen** – auch als
+  Teil eines bezahlten Produkts, Abos oder Dienstes, in dem sie ausgeliefert wird. Freiwillige Spenden sind kein Verkauf.
+- **Pflicht:** Lizenztext und Copyright mitgeben; veränderte Versionen als verändert kennzeichnen und unter denselben
+  Bedingungen weitergeben.
+- Dies ist keine Open-Source-Lizenz im Sinne der OSI-Definition (wegen der Verkaufsbeschränkung).
+- Die **Version 0.2.0 und älter** wurde unter der MIT-Lizenz veröffentlicht; bereits erhaltene Kopien bleiben darunter.
+- Anfragen zur Genehmigung eines Verkaufs: über das [GitHub-Repository](https://github.com/supaeasy/framescope).
 Es nutzt **FFmpeg** (LGPL v2.1+, dynamisch gelinkt, unverändert als DLLs beigelegt) sowie weitere Open-Source-Bibliotheken –
 siehe [THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md).

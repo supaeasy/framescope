@@ -1,21 +1,80 @@
-MIT License
+FrameScope License (No Sale Without Permission), Version 1.0
 
-Copyright (c) 2026 supaeasy
+Copyright (c) 2026 supaeasy ("Licensor")
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+1. Definitions
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+   "Software" means FrameScope, i.e. the source code, documentation and any
+   compiled form (such as the portable ZIP package) distributed by the Licensor
+   under these terms, together with any modified version or work derived from it
+   ("Derivative Work").
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+   "Sell" means to distribute, license or otherwise make the Software or a
+   Derivative Work available to third parties in exchange for money or any other
+   consideration, including as part of a paid product, bundle, subscription,
+   app store listing or paid service in which the Software (or a substantial
+   part of it) is delivered or is a material component. Accepting voluntary
+   donations that are not a condition for receiving the Software is not selling.
+
+2. Grant of rights
+
+   Subject to the conditions below, permission is hereby granted, free of
+   charge, to any person obtaining a copy of the Software to use, copy, modify,
+   merge, publish and distribute the Software and Derivative Works, and to
+   permit others to do so, for any purpose, including use within a business,
+   school, research or other commercial setting. Using the Software to produce
+   or analyse work for which you are paid (for example video editing, quality
+   control or analysis) is allowed and is not selling the Software.
+
+3. Selling requires prior written permission
+
+   You may NOT Sell the Software or any Derivative Work without the Licensor's
+   prior written permission. Such permission is granted at the Licensor's sole
+   discretion, may be subject to conditions or fees, and applies only to the
+   specific use that is expressly approved. Silence or the absence of a
+   response is not permission.
+
+4. Conditions
+
+   a) The above copyright notice and this license text must be included in all
+      copies and in all distributions of the Software and Derivative Works.
+   b) Derivative Works must be clearly marked as modified and must be
+      distributed under these same terms.
+   c) You may not remove or alter copyright notices, and you may not suggest
+      that the Licensor endorses you or your Derivative Work.
+
+5. Third-party components
+
+   The Software uses third-party components that are licensed under their own
+   terms, in particular FFmpeg (GNU LGPL v2.1 or later, linked dynamically and
+   shipped as unmodified DLLs) and several Rust libraries. They are listed in
+   THIRD-PARTY-LICENSES.md. This license applies only to the Licensor's own
+   code and does not restrict any rights you have under those third-party
+   licenses. Section 3 does not apply to the third-party components themselves.
+
+6. Termination
+
+   Your rights under this license end automatically if you violate any of its
+   terms. Rights of persons who received copies from you in compliance with this
+   license continue as long as those persons comply as well.
+
+7. No warranty and limitation of liability
+
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+   LICENSOR BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+   ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+   WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE, TO THE EXTENT
+   PERMITTED BY APPLICABLE LAW.
+
+8. Earlier versions
+
+   Versions of the Software up to and including v0.2.0 were published under the
+   MIT License. Copies of those versions that you already received remain under
+   the MIT License. These terms apply to all later versions.
+
+9. Permission requests
+
+   Requests for permission to Sell the Software can be sent to the Licensor via
+   the GitHub repository: https://github.com/supaeasy/framescope

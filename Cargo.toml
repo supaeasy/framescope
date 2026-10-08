@@ -3,7 +3,7 @@ name = "framescope"
 version = "0.2.0"
 edition = "2021"
 description = "Schlanker, portabler Videoplayer für frame-genaue Analyse"
-license = "MIT"
+license-file = "LICENSE"
 rust-version = "1.88"
 
 [dependencies]

@@ -15,7 +15,7 @@ Schlanker, portabler Videoplayer für Windows 11 mit Fokus auf **frame-genaue An
 | PNG-Export | `image` (nur PNG-Feature) | Volle Originalauflösung aus dem dekodierten Frame (swscale → RGBA). |
 
 ### Lizenz
-FFmpeg wird als **LGPL-Build, dynamisch gelinkt** genutzt (DLLs im ZIP, keine GPL-Komponenten wie x264/x265). Projektlizenz: **MIT** (kompatibel zu dynamischem LGPL-Linking). Lizenztexte/Hinweise liegen dem Release bei (`THIRD-PARTY-LICENSES.md`).
+FFmpeg wird als **LGPL-Build, dynamisch gelinkt** genutzt (DLLs im ZIP, keine GPL-Komponenten wie x264/x265). Projektlizenz: eigene Source-Available-Lizenz „Kein Verkauf ohne Genehmigung“ (siehe `LICENSE`; ab v0.2.1 – v0.2.0 und älter standen unter MIT), kompatibel zu dynamischem LGPL-Linking. Lizenztexte/Hinweise liegen dem Release bei (`THIRD-PARTY-LICENSES.md`).
 
 ## Architektur
 

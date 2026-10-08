@@ -5,6 +5,9 @@ Alle nennenswerten Änderungen an FrameScope. Das Format folgt
 
 ## [Unreleased]
 
+### Geändert
+- **Lizenz:** neue Lizenz „FrameScope License (No Sale Without Permission)“ – Nutzung, Änderung und Weitergabe bleiben frei, der **Verkauf** der Software oder abgeleiteter Versionen ist nur mit vorheriger schriftlicher Genehmigung erlaubt. Version 0.2.0 und älter bleibt unter der MIT-Lizenz.
+
 ## [0.2.0] - 2026-10-08
 
 ### Hinzugefügt
