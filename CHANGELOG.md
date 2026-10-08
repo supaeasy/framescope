@@ -5,6 +5,13 @@ Alle nennenswerten Änderungen an FrameScope. Das Format folgt
 
 ## [Unreleased]
 
+### Behoben
+- **Sync: Start nach Pause.** Folgefenster sprangen beim Start jedes Mal per Seek vor und liefen erst nach 1–2 Sekunden synchron. Jetzt startet ein Fenster, das schon auf dem richtigen Frame steht, sofort ohne Seek, und das führende Fenster kündigt Play ca. 250 ms im Voraus an, damit alle gemeinsam loslaufen (gemessen: 4 Fenster direkt nach Play auf demselben Frame, danach höchstens 1–2 Frames Abstand statt bis zu ~40 Frames).
+- **Ton nach Video-Nachholen.** Wurde das Video ohne Seek auf einen Frame nachgeholt (Decoder läuft vorwärts oder Frame aus dem Cache), blieb der Ton an der alten Stelle; beim Start sprang die Position zurück. Der Ton wird jetzt bei Abweichung über 0,08 s neu ausgerichtet.
+- **Audio-Clock nach einer Pause.** Direkt nach dem Fortsetzen lieferte die Clock kurz einen veralteten Wert (Pausenposition plus Pausendauer), wodurch das Video Frames übersprang. Das Video wartet nach dem Start nun, bis der Ton wirklich läuft.
+- Folgefenster erklären sich beim geplanten Start nicht mehr selbst zum Führenden.
+- Drift-Korrektur im Sync reagiert schneller (Abkühlzeit 0,8 s statt 1,2 s).
+
 ### Hinzugefügt
 - Rote Warnanzeige bei Frame-Ausfällen: unterscheidet „verworfen“ (Anzeige zu langsam) von „Decoder zu langsam“.
 - Diagnose-Schalter per Umgebungsvariable (`FRAMESCOPE_NO_VSYNC`, `FRAMESCOPE_DECODE_THREADS`, `FRAMESCOPE_QUEUE`, `FRAMESCOPE_UI_PRIO`); erweiterte Statistik von `FRAMESCOPE_BENCH`.

@@ -13,6 +13,10 @@ use std::sync::Arc;
 use std::time::Instant;
 
 const EPS: f64 = 1e-6;
+/// So lange (Sekunden) wartet das Video nach dem Start auf den Ton, bevor die Systemuhr einspringt.
+const AUDIO_START_WAIT: f64 = 0.4;
+/// Ab dieser Abweichung (Sekunden) zwischen Ton und angezeigtem Frame wird der Ton neu ausgerichtet.
+const AUDIO_ALIGN_TOLERANCE: f64 = 0.08;
 /// Speicherbudget für den Frame-Cache (rückwärts Schritte ohne neues Decodieren).
 const CACHE_BUDGET: usize = 256 * 1024 * 1024;
 /// So weit (in Frames) darf der Decoder vorwärts „durchlaufen“, bevor ein Seek günstiger ist.
@@ -26,6 +30,10 @@ pub struct Player {
     pub dropped: u64,
     /// Wie oft der Decoder beim Abspielen zu spät lieferte (kein Frame bereit, obwohl fällig).
     pub starved: u64,
+    /// Geplanter gemeinsamer Start (Sync): Abspielen beginnt zu diesem Zeitpunkt.
+    pending_start: Option<Instant>,
+    /// Vorlauf, mit dem ein Start angekündigt wird, solange andere Fenster synchron laufen.
+    pub play_delay: Option<std::time::Duration>,
     /// Anzahl Seeks über den Decoder (Sprünge, Schleifen, Sync-Korrekturen).
     pub hard_seeks: u64,
     starving: bool,
@@ -83,6 +91,8 @@ impl Player {
             shown: 0,
             dropped: 0,
             starved: 0,
+            pending_start: None,
+            play_delay: None,
             hard_seeks: 0,
             starving: false,
             events: 0,
@@ -131,11 +141,18 @@ impl Player {
             if let Some(clock) = self.external_clock {
                 return clock;
             }
-            // Audio ist Master-Clock; ohne Ton läuft die Systemuhr.
-            self.audio
-                .as_ref()
-                .and_then(AudioEngine::clock)
-                .unwrap_or_else(|| self.base_pos + self.base_time.elapsed().as_secs_f64())
+            // Audio ist Master-Clock. Direkt nach dem Start wartet das Video, bis der Ton wirklich
+            // läuft (sonst springt die Position zurück, sobald die Audio-Clock einsetzt). Ohne Ton,
+            // oder wenn er nicht anspringt, läuft die Systemuhr.
+            let elapsed = self.base_time.elapsed().as_secs_f64();
+            match self.audio.as_ref() {
+                Some(a) => a.clock().unwrap_or(if elapsed < AUDIO_START_WAIT {
+                    self.base_pos
+                } else {
+                    self.base_pos + elapsed
+                }),
+                None => self.base_pos + elapsed,
+            }
         } else {
             self.base_pos
         }
@@ -155,6 +172,16 @@ impl Player {
     pub fn poll(&mut self) -> bool {
         if let Ok(idx) = self.handle.index.try_recv() {
             self.index = Some(idx);
+        }
+        if let Some(at) = self.pending_start {
+            if Instant::now() >= at && self.target.is_none() {
+                self.pending_start = None;
+                // Der geplante Start ist keine neue Bedienung: Zähler zurücksetzen, damit ein
+                // Folgefenster sich dadurch nicht selbst zum Führenden erklärt.
+                let events = self.events;
+                self.set_playing(true);
+                self.events = events;
+            }
         }
         let mut assigned = 0u64;
         loop {
@@ -189,6 +216,9 @@ impl Player {
                     continue; // nur für den Cache (Prefetch vor dem Ziel)
                 }
                 self.target = None;
+                if self.playing {
+                    self.align_audio(frame.pts);
+                }
                 if let Some(started) = self.seek_started.take() {
                     let measured = started.elapsed().as_secs_f64();
                     self.seek_latency = (0.7 * self.seek_latency + 0.3 * measured).clamp(0.02, 0.8);
@@ -360,6 +390,7 @@ impl Player {
     fn hard_seek(&mut self, time: f64, from: f64) {
         self.events += 1;
         self.hard_seeks += 1;
+        crate::dlog::log(|| format!("hard_seek time={time:.3} from={from:.3}"));
         self.seek_started = Some(Instant::now());
         self.serial += 1;
         self.target = Some(time - EPS);
@@ -369,7 +400,7 @@ impl Player {
         self.base_pos = time;
         self.base_time = Instant::now();
         if let Some(a) = &self.audio {
-            a.seek(self.serial, time);
+            a.seek(time);
         }
         let _ = self.handle.cmd.send(Command::Seek {
             serial: self.serial,
@@ -396,6 +427,7 @@ impl Player {
     /// Zeigt Frame `n` an (aus dem Cache, durch Weiterlaufen des Decoders oder per Seek).
     pub fn goto_frame(&mut self, n: usize) {
         self.events += 1;
+        self.pending_start = None;
         let Some(idx) = self.index.clone() else {
             return;
         };
@@ -459,6 +491,8 @@ impl Player {
     }
 
     pub fn set_playing(&mut self, play: bool) {
+        self.pending_start = None;
+        crate::dlog::log(|| format!("set_playing {play} (war {})", self.playing));
         if play == self.playing {
             return;
         }
@@ -475,7 +509,25 @@ impl Player {
         self.base_pos = self.position();
         self.base_time = Instant::now();
         self.playing = play;
+        if play && self.target.is_none() {
+            if let Some(c) = self.current.clone() {
+                self.align_audio(c.pts);
+            }
+        }
         self.sync_audio();
+    }
+
+    /// Richtet den Ton auf die Zeit `pts` aus, falls er an einer anderen Stelle steht. Das passiert,
+    /// wenn das Video ohne Seek nachgeholt wurde (Decoder läuft vorwärts oder Frame aus dem Cache).
+    fn align_audio(&self, pts: f64) {
+        if let Some(a) = &self.audio {
+            if (a.position_hint() - pts).abs() > AUDIO_ALIGN_TOLERANCE {
+                crate::dlog::log(|| {
+                    format!("audio ausrichten: {:.3} -> {pts:.3}", a.position_hint())
+                });
+                a.seek(pts);
+            }
+        }
     }
 
     /// Ton läuft nur, wenn abgespielt wird und der Zielframe bereits angezeigt ist.
@@ -530,22 +582,75 @@ impl Player {
             if self.playing {
                 self.set_playing(false);
             }
-            self.follow(t, false, 0.0, true);
+            self.follow(t, false, 0.0, true, None);
             self.index.is_some()
         }
     }
 
+    /// Steht der Player ruhig auf dem Frame zur Zeit `t`, und liegt der Decoder-Strom direkt dahinter?
+    /// Dann kann die Wiedergabe ohne Seek sofort starten.
+    fn ready_at(&self, t: f64) -> bool {
+        self.target.is_none()
+            && self.synced()
+            && match (&self.index, self.frame_no()) {
+                (Some(idx), Some(n)) => idx.frame_at(t) == n,
+                _ => false,
+            }
+    }
+
+    /// Zeitpunkt eines angekündigten Starts (nur solange er noch aussteht).
+    pub fn scheduled_start(&self) -> Option<Instant> {
+        self.pending_start
+    }
+
     /// Folgt einer fremden Instanz: gleiche Position `t` (Sekunden) und gleicher Abspielzustand.
-    /// Beim Abspielen wird nur bei Abweichung über `tol` (und erlaubter Korrektur) gesprungen;
-    /// dabei wird die gemessene Seek-Dauer vorgehalten. Rückgabe: `true`, wenn ein Sprung ausgelöst wurde.
-    pub fn follow(&mut self, t: f64, playing: bool, tol: f64, may_correct: bool) -> bool {
+    ///
+    /// * Mit `start_at` (angekündigter gemeinsamer Start): auf den Frame bei `t` vorbereiten und
+    ///   zur Startzeit loslaufen.
+    /// * Steht der Player schon auf dem richtigen Frame, startet er sofort ohne Seek.
+    /// * Beim Abspielen wird nur bei Abweichung über `tol` (und erlaubter Korrektur) gesprungen;
+    ///   dabei wird die gemessene Seek-Dauer vorgehalten.
+    ///
+    /// Rückgabe: `true`, wenn ein Sprung/Seek ausgelöst wurde.
+    pub fn follow(
+        &mut self,
+        t: f64,
+        playing: bool,
+        tol: f64,
+        may_correct: bool,
+        start_at: Option<Instant>,
+    ) -> bool {
         let dur = self.duration();
         let t = if dur > 0.0 {
             t.clamp(0.0, dur)
         } else {
             t.max(0.0)
         };
+        crate::dlog::log(|| {
+            format!(
+                "follow t={t:.3} playing={playing} start_at={} (lokal: playing={} pos={:.3} target={:?})",
+                start_at.is_some(),
+                self.playing,
+                self.position(),
+                self.target
+            )
+        });
         if playing {
+            if let Some(at) = start_at {
+                if self.playing {
+                    self.set_playing(false);
+                }
+                let moved = self.follow(t, false, 0.0, true, None);
+                self.pending_start = Some(at);
+                return moved;
+            }
+            if self.pending_start.is_some() {
+                return false; // wartet auf den angekündigten Start
+            }
+            if !self.playing && self.ready_at(t) {
+                self.set_playing(true);
+                return false;
+            }
             let off = if self.playing {
                 (self.position() - t).abs()
             } else {
@@ -561,6 +666,7 @@ impl Player {
             }
             true
         } else {
+            self.pending_start = None;
             if self.playing {
                 self.set_playing(false);
             }
@@ -581,6 +687,19 @@ impl Player {
             // Am Ende: von vorn beginnen.
             let t0 = self.index.as_ref().and_then(|i| i.pts_of(0)).unwrap_or(0.0);
             self.hard_seek(t0, t0);
+        }
+        if self.pending_start.take().is_some() {
+            // Ein angekündigter Start wird durch erneutes Drücken abgebrochen.
+            self.events += 1;
+            return;
+        }
+        if !self.playing {
+            if let Some(delay) = self.play_delay {
+                // Andere Fenster laufen synchron: Start ankündigen, damit alle gemeinsam loslaufen.
+                self.events += 1;
+                self.pending_start = Some(Instant::now() + delay);
+                return;
+            }
         }
         self.set_playing(!self.playing);
     }

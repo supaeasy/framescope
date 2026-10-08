@@ -42,6 +42,10 @@ struct Shared {
     serial: AtomicU64,
     /// Ist `clock_*` für die aktuelle Seek-Generation gültig?
     valid: AtomicBool,
+    /// Zähler der Seek-Generationen (jeder Seek bekommt eine eigene, damit alte Chunks verworfen werden).
+    seq: AtomicU64,
+    /// Zuletzt bekannte Position (f64-Bits): vom Callback fortgeschrieben, vom Seek auf das Ziel gesetzt.
+    hint_bits: AtomicU64,
     /// Wiedergabezeit (f64-Bits) zum Zeitpunkt `stamp_ns`.
     clock_bits: AtomicU64,
     stamp_ns: AtomicU64,
@@ -71,6 +75,8 @@ impl AudioEngine {
             playing: AtomicBool::new(false),
             serial: AtomicU64::new(0),
             valid: AtomicBool::new(false),
+            seq: AtomicU64::new(0),
+            hint_bits: AtomicU64::new(0f64.to_bits()),
             clock_bits: AtomicU64::new(0f64.to_bits()),
             stamp_ns: AtomicU64::new(0),
             epoch: Instant::now(),
@@ -122,14 +128,27 @@ impl AudioEngine {
 
     /// Ausgabe starten/anhalten (Puffer bleiben erhalten).
     pub fn set_playing(&self, playing: bool) {
-        self.shared.playing.store(playing, Relaxed);
+        let was_playing = self.shared.playing.swap(playing, Relaxed);
+        if playing && !was_playing {
+            // Die gespeicherte Clock stammt von vor der Pause; bis der erste Callback sie neu setzt,
+            // darf sie nicht verwendet werden (sonst springt die Position um die Pausendauer).
+            self.shared.valid.store(false, Relaxed);
+        }
     }
 
     /// Verwirft gepufferten Ton und beginnt bei `time` (Sekunden).
-    pub fn seek(&self, serial: u64, time: f64) {
+    pub fn seek(&self, time: f64) {
+        let serial = self.shared.seq.fetch_add(1, Relaxed) + 1;
+        self.shared.hint_bits.store(time.to_bits(), Relaxed);
         self.shared.valid.store(false, Relaxed);
         self.shared.serial.store(serial, Relaxed);
         let _ = self.cmd.send(Cmd::Seek { serial, time });
+    }
+
+    /// Zuletzt bekannte Audioposition (auch im Stillstand): vom Callback fortgeschrieben, nach einem
+    /// Seek das Seek-Ziel.
+    pub fn position_hint(&self) -> f64 {
+        f64::from_bits(self.shared.hint_bits.load(Relaxed))
     }
 
     /// Aktuelle Wiedergabezeit laut Audioausgabe, sobald sie für die aktuelle
@@ -249,6 +268,7 @@ impl Mixer {
                 let latency = ts.playback.duration_since(ts.callback).as_secs_f64();
                 let now = c.pts + self.pos as f64 / f64::from(self.rate) - latency;
                 self.shared.clock_bits.store(now.to_bits(), Relaxed);
+                self.shared.hint_bits.store(now.to_bits(), Relaxed);
                 let stamp =
                     u64::try_from(self.shared.epoch.elapsed().as_nanos()).unwrap_or(u64::MAX);
                 self.shared.stamp_ns.store(stamp, Relaxed);
@@ -484,7 +504,7 @@ fn decode_loop(path: &Path, rate: u32, cmd_rx: &Receiver<Cmd>, tx: &Sender<Chunk
 pub fn selftest(path: &Path) -> Result<()> {
     let engine =
         AudioEngine::start(path, 0.0, true).ok_or_else(|| anyhow!("kein Audio verfügbar"))?;
-    engine.seek(1, 4.0);
+    engine.seek(4.0);
     engine.set_playing(true);
     let start = Instant::now();
     let mut first: Option<(f64, f64)> = None;

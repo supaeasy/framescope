@@ -6,7 +6,8 @@
 //!
 //! Protokoll (eine Textzeile pro Paket):
 //! * `FS1 <id> hello <sync 0|1> <t> <playing 0|1>` – Lebenszeichen alle 2 s (auch ohne Sync)
-//! * `FS1 <id> state <t> <playing 0|1>` – Zustand des Führenden: bei jeder Aktion und 2×/s beim Abspielen
+//! * `FS1 <id> state <t> <playing 0|1> [<start_at_ms>]` – Zustand des Führenden: bei jeder Aktion und 2×/s
+//!   beim Abspielen; `start_at_ms` kündigt einen gemeinsamen Start an (Unix-Millisekunden)
 //!
 //! `t` ist die Position auf der gemeinsamen Zeitachse (Sekunden). Jede Instanz hat einen
 //! festen Versatz `offset` zwischen gemeinsamer und eigener Zeit (siehe `SyncController::align`).
@@ -27,12 +28,23 @@ const PEER_TIMEOUT: Duration = Duration::from_secs(6);
 /// Ab dieser Abweichung (Sekunden) springt ein Folgender beim Abspielen nach.
 const DRIFT_TOLERANCE: f64 = 0.1;
 /// Mindestabstand zwischen zwei Korrektur-Sprüngen.
-const CORRECTION_COOLDOWN: Duration = Duration::from_millis(1200);
+const CORRECTION_COOLDOWN: Duration = Duration::from_millis(800);
+/// Vorlauf, mit dem ein gemeinsamer Start angekündigt wird (reicht für Vorbereitung/Seek der Folgefenster).
+const START_LEAD: Duration = Duration::from_millis(250);
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Msg {
-    Hello { sync: bool, t: f64, playing: bool },
-    State { t: f64, playing: bool },
+    Hello {
+        sync: bool,
+        t: f64,
+        playing: bool,
+    },
+    /// `start_at_ms`: angekündigter gemeinsamer Start (Unix-Millisekunden), sonst sofort.
+    State {
+        t: f64,
+        playing: bool,
+        start_at_ms: Option<u64>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -50,7 +62,14 @@ pub fn encode(from: u64, msg: &Msg) -> String {
                 u8::from(*playing)
             )
         }
-        Msg::State { t, playing } => format!("FS1 {from} state {t:.6} {}", u8::from(*playing)),
+        Msg::State {
+            t,
+            playing,
+            start_at_ms,
+        } => {
+            let start = start_at_ms.map_or(String::new(), |ms| format!(" {ms}"));
+            format!("FS1 {from} state {t:.6} {}{start}", u8::from(*playing))
+        }
     }
 }
 
@@ -70,7 +89,12 @@ pub fn decode(text: &str) -> Option<Packet> {
         "state" => {
             let t: f64 = it.next()?.parse().ok()?;
             let playing = it.next()? == "1";
-            Msg::State { t, playing }
+            let start_at_ms = it.next().and_then(|v| v.parse().ok());
+            Msg::State {
+                t,
+                playing,
+                start_at_ms,
+            }
         }
         _ => return None,
     };
@@ -273,7 +297,11 @@ impl SyncController {
                         },
                     );
                 }
-                Msg::State { t, playing } => {
+                Msg::State {
+                    t,
+                    playing,
+                    start_at_ms,
+                } => {
                     let peer = self.peers.entry(packet.from).or_insert(Peer {
                         last_seen: now,
                         sync: true,
@@ -288,10 +316,16 @@ impl SyncController {
                         seen_at: now,
                         playing,
                     };
+                    crate::dlog::log(|| {
+                        format!("recv state t={t:.3} playing={playing} start_at_ms={start_at_ms:?} enabled={}", self.enabled)
+                    });
                     if self.enabled {
                         self.leader = false;
                         if let Some(p) = player.as_deref_mut() {
-                            self.follow(p, t + self.offset, playing, now);
+                            let start_at = start_at_ms.map(|ms| {
+                                now + Duration::from_millis(ms.saturating_sub(unix_ms()))
+                            });
+                            self.follow(p, t + self.offset, playing, start_at, now);
                         }
                     }
                 }
@@ -305,6 +339,8 @@ impl SyncController {
         if player.events < self.seen_events {
             self.seen_events = player.events; // neues Video geöffnet
         }
+        // Läuft Sync mit Partnern, wird ein Start angekündigt, damit alle gemeinsam loslaufen.
+        player.play_delay = (self.enabled && self.synced_peers() > 0).then_some(START_LEAD);
         // Pausiert liefert `position()` die Zielposition (auch während eines Seeks).
         let local_pos = player.position();
         let shared_t = local_pos - self.offset;
@@ -315,9 +351,20 @@ impl SyncController {
             if self.enabled {
                 self.leader = true;
                 self.last_beat = now;
+                crate::dlog::log(|| {
+                    format!(
+                        "lokale Aktion -> sende (t={shared_t:.3}, playing={})",
+                        player.playing
+                    )
+                });
+                let start_at_ms = player.scheduled_start().map(|at| {
+                    unix_ms()
+                        + u64::try_from(at.saturating_duration_since(now).as_millis()).unwrap_or(0)
+                });
                 net.send(&Msg::State {
                     t: shared_t,
-                    playing: player.playing,
+                    playing: player.playing || start_at_ms.is_some(),
+                    start_at_ms,
                 });
             }
         }
@@ -331,6 +378,7 @@ impl SyncController {
             net.send(&Msg::State {
                 t: shared_t,
                 playing: true,
+                start_at_ms: None,
             });
         }
         if now.duration_since(self.last_hello) >= HELLO_EVERY {
@@ -344,14 +392,28 @@ impl SyncController {
     }
 
     /// Folgt dem Zustand des Führenden.
-    fn follow(&mut self, player: &mut Player, t: f64, playing: bool, now: Instant) {
+    fn follow(
+        &mut self,
+        player: &mut Player,
+        t: f64,
+        playing: bool,
+        start_at: Option<Instant>,
+        now: Instant,
+    ) {
         let cooldown_over = now.duration_since(self.last_correction) >= CORRECTION_COOLDOWN;
-        if player.follow(t, playing, DRIFT_TOLERANCE, cooldown_over) {
+        if player.follow(t, playing, DRIFT_TOLERANCE, cooldown_over, start_at) {
             self.last_correction = now;
         }
         // Eigene Folge-Aktionen sind keine Bedienung durch den Nutzer.
         self.seen_events = player.events;
     }
+}
+
+/// Aktuelle Zeit als Unix-Millisekunden (alle Instanzen laufen auf demselben Rechner).
+fn unix_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(0))
 }
 
 #[cfg(test)]
@@ -369,10 +431,17 @@ mod tests {
             Msg::State {
                 t: 0.0,
                 playing: true,
+                start_at_ms: None,
             },
             Msg::State {
                 t: 1234.5,
                 playing: false,
+                start_at_ms: None,
+            },
+            Msg::State {
+                t: 5.25,
+                playing: true,
+                start_at_ms: Some(1_790_000_000_123),
             },
         ];
         for m in msgs {
@@ -399,6 +468,7 @@ mod tests {
         a.send(&Msg::State {
             t: 3.5,
             playing: true,
+            start_at_ms: Some(42),
         });
         let mut got = None;
         for _ in 0..100 {
@@ -414,7 +484,8 @@ mod tests {
             p.msg,
             Msg::State {
                 t: 3.5,
-                playing: true
+                playing: true,
+                start_at_ms: Some(42)
             }
         );
     }

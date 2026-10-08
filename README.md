@@ -118,7 +118,8 @@ unterschiedlicher Auflösung). Frame-Export (`S`) und Loop beziehen sich auf Vid
 
 Mit `Y` (oder dem Button **Sync** oben rechts) nimmt ein Fenster an der Synchronisierung teil. Alle Fenster mit
 aktiviertem Sync folgen demjenigen, das **zuletzt bedient** wurde: Play/Pause, Scrubbing, Einzelbild-Schritte,
-Keyframe-Sprünge und Loop-Sprünge. Beim Abspielen sendet der Führende zweimal pro Sekunde seine Position;
+Keyframe-Sprünge und Loop-Sprünge. Play kündigt das führende Fenster ca. 250 ms im Voraus an, damit alle Fenster gemeinsam loslaufen (steht ein Fenster
+schon auf dem richtigen Frame, startet es ohne Seek). Beim Abspielen sendet der Führende zweimal pro Sekunde seine Position;
 weicht ein Fenster um mehr als 0,1 s ab, springt es nach (mit Vorhalt für die gemessene Seek-Dauer). Im Pausenzustand
 landen alle Fenster **frame-genau** auf demselben Zeitpunkt (bei unterschiedlicher Framerate: auf dem letzten
 Frame bis zu dieser Zeit).
@@ -194,7 +195,8 @@ ausfallen. *Verworfen* heißt: die Anzeige kam nicht hinterher (Oberfläche/Graf
 einem 60-Hz-Monitor); *Decoder zu langsam* heißt: der nächste Frame war nicht rechtzeitig dekodiert (Auflösung, Codec,
 Bitrate). Zum Eingrenzen gibt es Umgebungsvariablen (vor dem Start setzen): `FRAMESCOPE_NO_VSYNC=1` (ohne V-Sync,
 nur zur Diagnose), `FRAMESCOPE_DECODE_THREADS=<n>` (Decoder-Threads), `FRAMESCOPE_QUEUE=<n>` (Frames Vorlauf) und
-`FRAMESCOPE_UI_PRIO=1` (Oberfläche höher priorisieren).
+`FRAMESCOPE_UI_PRIO=1` (Oberfläche höher priorisieren). Mit `FRAMESCOPE_LOG=1` schreibt jedes Fenster ein
+Ereignisprotokoll `framescope-log-<PID>.txt` (Sync-Nachrichten, Seeks, Start/Stopp) neben die EXE.
 
 Entwickler-Hilfen: `framescope.exe --version`, `--bench <datei>` (Decoder-Durchsatz und Index, ohne Fenster),
 `--audio-selftest <datei>` (Drift der Audio-Clock) sowie die Umgebungsvariable `FRAMESCOPE_BENCH=<sekunden>`

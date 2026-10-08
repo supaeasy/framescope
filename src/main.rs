@@ -4,6 +4,7 @@ mod app;
 mod audio;
 mod compare;
 mod decoder;
+mod dlog;
 mod export;
 mod index;
 mod player;

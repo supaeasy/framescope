@@ -1487,6 +1487,10 @@ impl eframe::App for PlayerApp {
         self.draw_toast(&ctx);
         self.bench_tick(&ctx, time);
 
+        if let Some(at) = self.player.as_ref().and_then(Player::scheduled_start) {
+            // Angekündigter gemeinsamer Start: zum Zeitpunkt aufwachen.
+            ctx.request_repaint_after(at.saturating_duration_since(std::time::Instant::now()));
+        }
         if self.sync.available() {
             // Lebenszeichen an andere Instanzen auch im Leerlauf.
             ctx.request_repaint_after(std::time::Duration::from_secs(1));
