@@ -29,6 +29,8 @@ pub struct Player {
     /// Gemessene Dauer eines Seeks bis zum angezeigten Zielframe (Sekunden, geglättet).
     seek_latency: f64,
     seek_started: Option<Instant>,
+    /// Fremde Uhr (Vergleichsmodus: Video B läuft auf der Uhr von Video A).
+    pub external_clock: Option<f64>,
     /// Loop-Bereich (Frame-Nummern, inklusive) und Schalter.
     pub loop_in: Option<usize>,
     pub loop_out: Option<usize>,
@@ -63,8 +65,13 @@ impl Player {
         wake: impl Fn() + Send + Sync + Clone + 'static,
         volume: f32,
         muted: bool,
+        with_audio: bool,
     ) -> Self {
-        let audio = AudioEngine::start(&path, volume, muted);
+        let audio = if with_audio {
+            AudioEngine::start(&path, volume, muted)
+        } else {
+            None
+        };
         Self {
             handle: DecoderHandle::spawn(path.clone(), wake),
             path,
@@ -73,6 +80,7 @@ impl Player {
             events: 0,
             seek_latency: 0.15,
             seek_started: None,
+            external_clock: None,
             loop_in: None,
             loop_out: None,
             loop_on: false,
@@ -112,6 +120,9 @@ impl Player {
     /// Aktuelle Wiedergabeposition in Sekunden.
     pub fn position(&self) -> f64 {
         if self.playing && self.target.is_none() {
+            if let Some(clock) = self.external_clock {
+                return clock;
+            }
             // Audio ist Master-Clock; ohne Ton läuft die Systemuhr.
             self.audio
                 .as_ref()
@@ -473,6 +484,31 @@ impl Player {
         self.muted = m;
         if let Some(a) = &self.audio {
             a.set_muted(m);
+        }
+    }
+
+    /// Richtet den Player hart auf `t`/`playing` aus (Vergleichsmodus, bei jeder Aktion des Masters).
+    /// Rückgabe `false`: noch nicht vollständig ausgeführt (Index fehlt) – später erneut aufrufen.
+    pub fn mirror(&mut self, t: f64, playing: bool) -> bool {
+        if playing {
+            let was_playing = self.playing;
+            let dur = self.duration();
+            let t = if dur > 0.0 {
+                t.clamp(0.0, dur)
+            } else {
+                t.max(0.0)
+            };
+            self.seek_time(t + self.seek_latency);
+            if !was_playing {
+                self.set_playing(true);
+            }
+            true
+        } else {
+            if self.playing {
+                self.set_playing(false);
+            }
+            self.follow(t, false, 0.0, true);
+            self.index.is_some()
         }
     }
 

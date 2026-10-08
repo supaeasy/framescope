@@ -6,7 +6,13 @@ Alle nennenswerten Änderungen an FrameScope. Das Format folgt
 ## [Unreleased]
 
 ### Hinzugefügt
+- A/B-Vergleich zweier Videos in einem Fenster (`Strg+B`, `framescope.exe A B`): Schieber, Nebeneinander, Überblenden (`C`); Video B läuft auf der Uhr von A.
 - Synchronisierte Wiedergabe mehrerer Fenster (`Y`): Play/Pause, Scrubbing, Einzelbild, Keyframe- und Loop-Sprünge, frame-genau im Pausenzustand; Versatz-Abgleich (`Umschalt+Y`); `--sync` auf der Kommandozeile.
+
+### Geändert
+- Texturen werden nur noch bei neuem Frame hochgeladen (weniger CPU bei 4K); Infozeile wird in schmalen Fenstern ausgeblendet statt andere Bedienelemente zu überlappen.
+
+### Hinzugefügt (Entwickler)
 - Anzeige verworfener Frames, Entwickler-Flags `--version`, `--bench`, `--audio-selftest`.
 
 ## [0.1.0] - 2026-10-08

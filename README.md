@@ -17,6 +17,7 @@ geschrieben in Rust. Kein Installer, keine Registry-Einträge, keine Daten in `%
 - **PNG-Export** des aktuellen Frames in voller Originalauflösung (`S`)
 - **Audio** mit Audio als Master-Clock (A/V-Sync), Lautstärke und Mute
 - **Mehrere Instanzen** zum Vergleichen: jedes Fenster ist ein eigener Prozess (`Strg+N`)
+- **A/B-Vergleich** zweier Videos in einem Fenster: Schieber über dem Bild, Nebeneinander, Überblenden
 - **Synchronisierte Wiedergabe** mehrerer Fenster (Play, Pause, Seek, Einzelbild, Loop-Sprünge)
 - **Portable** und **Dark-UI**: Controls blenden sich bei Inaktivität aus, Video im Vordergrund
 
@@ -35,6 +36,8 @@ geschrieben in Rust. Kein Installer, keine Registry-Einträge, keine Daten in `%
 | `M` | Stumm |
 | `↑` / `↓` | Lautstärke ±5 % |
 | `F` / `Esc` / Doppelklick | Vollbild |
+| `Strg` + `B` | Zweites Video **B** zum Vergleich öffnen (nochmal drücken: Vergleich beenden) |
+| `C` | Vergleichsmodus wechseln (Schieber → Nebeneinander → Überblenden) |
 | `Y` | Wiedergabe mit anderen FrameScope-Fenstern **synchronisieren** (an/aus) |
 | `Umschalt` + `Y` | Sync-Versatz abgleichen (siehe unten) |
 | `H` | Dauerhaftes Info-Overlay (Frame, Timecode, KEY) oben links |
@@ -42,7 +45,8 @@ geschrieben in Rust. Kein Installer, keine Registry-Einträge, keine Daten in `%
 | `Strg` + `N` | Neues Fenster (weitere Instanz) |
 | `F1` | Tastenkürzel anzeigen |
 
-Videos lassen sich per **Drag & Drop**, **Strg+O** oder als **Kommandozeilenargument** öffnen:
+Videos lassen sich per **Drag & Drop**, **Strg+O** oder als **Kommandozeilenargument** öffnen (ein zweites Argument
+startet den A/B-Vergleich):
 
 ```powershell
 framescope.exe "C:\Videos\clip.mp4"
@@ -61,6 +65,28 @@ framescope.exe "C:\Videos\clip.mp4"
   die Wiedergabe läuft sofort.
 - Rückwärts-Schritte kommen aus einem Frame-Cache; bei einem Cache-Miss wird zum vorherigen Keyframe gesprungen und
   vorwärts bis zum Zielframe dekodiert.
+
+### A/B-Vergleich (zwei Videos in einem Fenster)
+
+Video B öffnest du über **Vergleichen…** (oben rechts), `Strg+B`, per Drag & Drop mit gedrückter `Umschalt`-Taste
+(bzw. in die rechte Fensterhälfte, wenn der Vergleich schon läuft) oder direkt beim Start:
+
+```powershell
+framescope.exe "A.mp4" "B.mp4"
+```
+
+B läuft **auf der Uhr von A**: Play/Pause, Scrubbing, Einzelbild-Schritte, Keyframe-Sprünge und Loop gelten für beide
+Videos zugleich; Ton kommt nur von A. Beide werden nach Zeit gepaart (bei unterschiedlicher Framerate der jeweils letzte
+Frame bis zu dieser Zeit). Die Anzeige `B F 88 / 300` zeigt Frame und Gesamtzahl von B.
+
+| Modus | Darstellung |
+|---|---|
+| **Schieber** | A links, B rechts der Trennlinie; Ziehen im Bild verschiebt den Schieber |
+| **Nebeneinander** | beide Videos je in einer Hälfte, jeweils mit eigenem Seitenverhältnis |
+| **Überblenden** | B wird über A eingeblendet; der Schieber (Ziehen im Bild) steuert die Deckkraft |
+
+Im Schieber- und Überblenden-Modus wird B auf das Bildfeld von A gestreckt (sinnvoll für gleichen Inhalt in
+unterschiedlicher Auflösung). Frame-Export (`S`) und Loop beziehen sich auf Video A.
 
 ### Synchronisierte Wiedergabe (mehrere Fenster)
 

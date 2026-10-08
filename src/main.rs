@@ -2,6 +2,7 @@
 
 mod app;
 mod audio;
+mod compare;
 mod decoder;
 mod export;
 mod index;
@@ -44,14 +45,17 @@ fn main() -> anyhow::Result<()> {
     }
 
     // Optionales Kommandozeilenargument: Videodatei.
-    // Kommandozeile: [--sync] [Videodatei]
+    // Kommandozeile: [--sync] [Video A] [Video B → Vergleichsmodus]
     let mut sync = false;
     let mut initial: Option<PathBuf> = None;
+    let mut initial_b: Option<PathBuf> = None;
     for arg in std::env::args_os().skip(1) {
         if arg == "--sync" {
             sync = true;
         } else if initial.is_none() {
             initial = Some(PathBuf::from(arg));
+        } else if initial_b.is_none() {
+            initial_b = Some(PathBuf::from(arg));
         }
     }
 
@@ -69,7 +73,7 @@ fn main() -> anyhow::Result<()> {
         options,
         Box::new(move |cc| {
             ui::apply_theme(&cc.egui_ctx);
-            Ok(Box::new(app::PlayerApp::new(cc, initial, sync)))
+            Ok(Box::new(app::PlayerApp::new(cc, initial, initial_b, sync)))
         }),
     )
     .map_err(|e| anyhow::anyhow!("UI-Fehler: {e}"))

@@ -1,5 +1,7 @@
 //! Anwendungsfenster: Eingabe, Zeichnen von Video, Controls und Overlay.
 
+use crate::compare::{self, Compare};
+use crate::decoder::Frame;
 use crate::player::Player;
 use crate::settings::Settings;
 use crate::sync::SyncController;
@@ -11,6 +13,7 @@ use eframe::egui::{
     TextureOptions, Vec2,
 };
 use std::path::PathBuf;
+use std::sync::Arc;
 
 /// Wie lange die Controls nach der letzten Mausbewegung sichtbar bleiben.
 const CONTROLS_TIMEOUT: f64 = 2.5;
@@ -23,12 +26,15 @@ const VIDEO_EXTENSIONS: &[&str] = &[
 /// Nachrichten von Hintergrund-Threads (Dialoge, Export) an die UI.
 enum Msg {
     Open(PathBuf),
+    OpenB(PathBuf),
     Toast { text: String, error: bool },
     ExportDir(PathBuf),
 }
 
 pub struct PlayerApp {
     player: Option<Player>,
+    compare: Option<Compare>,
+    uploaded: Option<Arc<Frame>>,
     settings: Settings,
     export_dir_changed: bool,
     volume: f32,
@@ -51,12 +57,15 @@ impl PlayerApp {
     pub fn new(
         cc: &eframe::CreationContext<'_>,
         initial: Option<PathBuf>,
+        initial_b: Option<PathBuf>,
         sync_on_start: bool,
     ) -> Self {
         let (msg_tx, msg_rx) = unbounded();
         let settings = Settings::load();
         let mut app = Self {
             player: None,
+            compare: None,
+            uploaded: None,
             volume: settings.volume,
             muted: settings.muted,
             hud: settings.hud,
@@ -82,6 +91,9 @@ impl PlayerApp {
         app.sync.set_enabled(sync_on_start, None);
         if let Some(path) = initial {
             app.open(&cc.egui_ctx, path);
+            if let Some(b) = initial_b {
+                app.open_b(&cc.egui_ctx, b);
+            }
         }
         app
     }
@@ -100,11 +112,45 @@ impl PlayerApp {
             move || wake_ctx.request_repaint(),
             self.volume,
             self.muted,
+            true,
         ));
+        if let Some(c) = self.compare.as_mut() {
+            c.invalidate();
+        }
+    }
+
+    /// Öffnet `path` als Video B im Vergleichsmodus.
+    fn open_b(&mut self, ctx: &egui::Context, path: PathBuf) {
+        if self.player.is_none() {
+            self.toast(ctx, "Öffne zuerst Video A", true);
+            return;
+        }
+        let wake_ctx = ctx.clone();
+        let player = Player::new(path, move || wake_ctx.request_repaint(), 0.0, true, false);
+        let mut new = Compare::new(player);
+        if let Some(old) = self.compare.as_ref() {
+            new.mode = old.mode;
+            new.split = old.split;
+        }
+        let title = {
+            let a = self
+                .player
+                .as_ref()
+                .map_or_else(String::new, |p| file_label(&p.path));
+            format!("{a} vs {} – FrameScope", file_label(&new.player.path))
+        };
+        ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
+        self.compare = Some(new);
+    }
+
+    fn close_compare(&mut self, ctx: &egui::Context) {
+        if self.compare.take().is_some() {
+            self.toast(ctx, "Vergleich beendet", false);
+        }
     }
 
     /// Dateidialog in eigenem Thread, damit das Fenster nicht blockiert.
-    fn open_dialog(&self, ctx: &egui::Context) {
+    fn open_dialog(&self, ctx: &egui::Context, as_b: bool) {
         let (tx, ctx) = (self.msg_tx.clone(), ctx.clone());
         std::thread::spawn(move || {
             let picked = rfd::FileDialog::new()
@@ -112,7 +158,7 @@ impl PlayerApp {
                 .add_filter("Alle Dateien", &["*"])
                 .pick_file();
             if let Some(p) = picked {
-                let _ = tx.send(Msg::Open(p));
+                let _ = tx.send(if as_b { Msg::OpenB(p) } else { Msg::Open(p) });
                 ctx.request_repaint();
             }
         });
@@ -227,16 +273,35 @@ impl PlayerApp {
         });
     }
 
-    fn upload_texture(&mut self, ctx: &egui::Context) {
-        let Some(frame) = self.player.as_ref().and_then(|p| p.current.clone()) else {
-            return;
-        };
-        // RGBA ist opak (Alpha 255) → unmultiplied == premultiplied, direkter Cast ohne Pixelschleife.
-        let pixels: Vec<Color32> = bytemuck::cast_slice(&frame.rgba).to_vec();
-        let image = egui::ColorImage::new([frame.width, frame.height], pixels);
-        match self.texture.as_mut() {
-            Some(t) => t.set(image, TextureOptions::LINEAR),
-            None => self.texture = Some(ctx.load_texture("video", image, TextureOptions::LINEAR)),
+    /// Lädt neue Frames von A (und B) in Texturen; unveränderte Frames werden nicht erneut hochgeladen.
+    fn upload_textures(&mut self, ctx: &egui::Context) {
+        if let Some(frame) = self.player.as_ref().and_then(|p| p.current.clone()) {
+            upload(
+                ctx,
+                &frame,
+                &mut self.texture,
+                &mut self.uploaded,
+                "video_a",
+            );
+        }
+        if let Some(c) = self.compare.as_mut() {
+            if let Some(frame) = c.player.current.clone() {
+                upload(ctx, &frame, &mut c.texture, &mut c.uploaded, "video_b");
+            }
+        }
+    }
+
+    /// Video B pollen und auf Video A ausrichten; Fehler beenden den Vergleich.
+    fn update_compare(&mut self, ctx: &egui::Context) {
+        let mut failure = None;
+        if let (Some(c), Some(a)) = (self.compare.as_mut(), self.player.as_ref()) {
+            c.player.poll();
+            c.follow_master(a);
+            failure = c.player.error.take();
+        }
+        if let Some(e) = failure {
+            self.compare = None;
+            self.toast(ctx, format!("Video B: {e}"), true);
         }
     }
 
@@ -245,6 +310,7 @@ impl PlayerApp {
         while let Ok(msg) = self.msg_rx.try_recv() {
             match msg {
                 Msg::Open(path) => self.open(ctx, path),
+                Msg::OpenB(path) => self.open_b(ctx, path),
                 Msg::Toast { text, error } => self.toast = Some((text, error, now + TOAST_SECS)),
                 Msg::ExportDir(dir) => {
                     self.settings.export_dir = Some(dir);
@@ -280,6 +346,9 @@ impl PlayerApp {
             help: bool,
             sync: bool,
             sync_align: bool,
+            compare_toggle: bool,
+            compare_mode: bool,
+            drop_to_b: bool,
         }
         // Zählt Tastendrücke (inkl. Wiederholungen) und verbraucht sie.
         fn presses(i: &mut egui::InputState, mods: Modifiers, key: Key) -> usize {
@@ -294,6 +363,7 @@ impl PlayerApp {
             while i.consume_key(mods, key) {}
             n
         }
+        let compare_active = self.compare.is_some();
         let k = ctx.input_mut(|i| Keys {
             dropped: i
                 .raw
@@ -321,14 +391,37 @@ impl PlayerApp {
             escape: i.consume_key(Modifiers::NONE, Key::Escape),
             hud: i.consume_key(Modifiers::NONE, Key::H),
             help: i.consume_key(Modifiers::NONE, Key::F1),
+            compare_toggle: i.consume_key(Modifiers::COMMAND, Key::B),
+            compare_mode: i.consume_key(Modifiers::NONE, Key::C),
+            drop_to_b: i.modifiers.shift
+                || (compare_active
+                    && i.pointer
+                        .hover_pos()
+                        .is_some_and(|p| p.x > i.content_rect().center().x)),
             sync_align: i.consume_key(Modifiers::SHIFT, Key::Y),
             sync: i.consume_key(Modifiers::NONE, Key::Y),
         });
         if let Some(path) = k.dropped {
-            self.open(ctx, path);
+            if k.drop_to_b && self.player.is_some() {
+                self.open_b(ctx, path);
+            } else {
+                self.open(ctx, path);
+            }
+        }
+        if k.compare_toggle {
+            if self.compare.is_some() {
+                self.close_compare(ctx);
+            } else {
+                self.open_dialog(ctx, true);
+            }
+        }
+        if k.compare_mode {
+            if let Some(c) = self.compare.as_mut() {
+                c.mode = c.mode.next();
+            }
         }
         if k.open {
-            self.open_dialog(ctx);
+            self.open_dialog(ctx, false);
         }
         if k.new_win {
             self.new_window();
@@ -397,19 +490,130 @@ impl PlayerApp {
     fn draw_video(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         let full = ui.max_rect();
         ui.painter().rect_filled(full, 0.0, Color32::BLACK);
+        let resp = ui.interact(full, egui::Id::new("video_area"), Sense::click_and_drag());
         // Doppelklick auf das Video: Vollbild umschalten.
-        if ui
-            .interact(full, egui::Id::new("video_area"), Sense::click())
-            .double_clicked()
-        {
+        if resp.double_clicked() {
             self.set_fullscreen(ctx, !self.fullscreen);
         }
-        let Some(tex) = &self.texture else { return };
-        let size = tex.size_vec2();
-        let scale = (full.width() / size.x).min(full.height() / size.y);
-        let rect = Rect::from_center_size(full.center(), size * scale);
-        let uv = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
-        ui.painter().image(tex.id(), rect, uv, Color32::WHITE);
+        let Some(tex_a) = self.texture.clone() else {
+            return;
+        };
+        let painter = ui.painter().clone();
+        let name_a = self
+            .player
+            .as_ref()
+            .map_or_else(String::new, |p| file_label(&p.path));
+
+        let Some(c) = self.compare.as_mut() else {
+            let rect = compare::fit(full, tex_a.size_vec2());
+            painter.image(tex_a.id(), rect, compare::FULL_UV, Color32::WHITE);
+            return;
+        };
+        let tex_b = c.texture.clone();
+        let name_b = file_label(&c.player.path);
+        let pointer_x = resp.interact_pointer_pos().map(|p| p.x);
+
+        match c.mode {
+            compare::Mode::Wipe => {
+                let rect = compare::fit(full, tex_a.size_vec2());
+                painter.image(tex_a.id(), rect, compare::FULL_UV, Color32::WHITE);
+                if resp.dragged() {
+                    if let Some(x) = pointer_x {
+                        c.split = ((x - rect.left()) / rect.width()).clamp(0.0, 1.0);
+                    }
+                }
+                let x = rect.left() + c.split * rect.width();
+                if let Some(tb) = &tex_b {
+                    if let Some((part, uv)) = compare::right_part(rect, x) {
+                        painter.image(tb.id(), part, uv, Color32::WHITE);
+                    }
+                }
+                // Schieber: Linie mit Griff.
+                let near = ctx
+                    .input(|i| i.pointer.hover_pos())
+                    .is_some_and(|p| (p.x - x).abs() < 14.0 && rect.contains(p));
+                if near || resp.dragged() {
+                    ctx.set_cursor_icon(CursorIcon::ResizeHorizontal);
+                }
+                painter.line_segment(
+                    [egui::pos2(x, rect.top()), egui::pos2(x, rect.bottom())],
+                    Stroke::new(3.0, Color32::from_black_alpha(120)),
+                );
+                painter.line_segment(
+                    [egui::pos2(x, rect.top()), egui::pos2(x, rect.bottom())],
+                    Stroke::new(1.5, Color32::WHITE),
+                );
+                let mid = egui::pos2(x, rect.center().y);
+                painter.circle_filled(mid, 15.0, Color32::from_black_alpha(170));
+                painter.circle_stroke(mid, 15.0, Stroke::new(1.5, Color32::WHITE));
+                for dir in [-1.0f32, 1.0] {
+                    let tip = mid + Vec2::new(dir * 9.0, 0.0);
+                    let base = mid + Vec2::new(dir * 3.0, 0.0);
+                    painter.add(egui::Shape::convex_polygon(
+                        vec![tip, base + Vec2::new(0.0, -5.0), base + Vec2::new(0.0, 5.0)],
+                        Color32::WHITE,
+                        Stroke::NONE,
+                    ));
+                }
+                chip(
+                    &painter,
+                    rect.left_top() + Vec2::new(10.0, 58.0),
+                    Align2::LEFT_TOP,
+                    &format!("A  {name_a}"),
+                );
+                chip(
+                    &painter,
+                    rect.right_top() + Vec2::new(-10.0, 58.0),
+                    Align2::RIGHT_TOP,
+                    &format!("B  {name_b}"),
+                );
+            }
+            compare::Mode::SideBySide => {
+                let mid = full.center().x;
+                let left = Rect::from_min_max(full.min, egui::pos2(mid - 1.0, full.max.y));
+                let right = Rect::from_min_max(egui::pos2(mid + 1.0, full.min.y), full.max);
+                let rect_a = compare::fit(left, tex_a.size_vec2());
+                painter.image(tex_a.id(), rect_a, compare::FULL_UV, Color32::WHITE);
+                chip(
+                    &painter,
+                    rect_a.left_top() + Vec2::new(10.0, 58.0),
+                    Align2::LEFT_TOP,
+                    &format!("A  {name_a}"),
+                );
+                if let Some(tb) = &tex_b {
+                    let rect_b = compare::fit(right, tb.size_vec2());
+                    painter.image(tb.id(), rect_b, compare::FULL_UV, Color32::WHITE);
+                    chip(
+                        &painter,
+                        rect_b.left_top() + Vec2::new(10.0, 58.0),
+                        Align2::LEFT_TOP,
+                        &format!("B  {name_b}"),
+                    );
+                }
+                painter.line_segment(
+                    [egui::pos2(mid, full.top()), egui::pos2(mid, full.bottom())],
+                    Stroke::new(2.0, Color32::from_gray(60)),
+                );
+            }
+            compare::Mode::Blend => {
+                let rect = compare::fit(full, tex_a.size_vec2());
+                painter.image(tex_a.id(), rect, compare::FULL_UV, Color32::WHITE);
+                if resp.dragged() {
+                    if let Some(x) = pointer_x {
+                        c.split = ((x - rect.left()) / rect.width()).clamp(0.0, 1.0);
+                    }
+                }
+                if let Some(tb) = &tex_b {
+                    painter.image(tb.id(), rect, compare::FULL_UV, compare::fade(c.split));
+                }
+                chip(
+                    &painter,
+                    rect.left_top() + Vec2::new(10.0, 58.0),
+                    Align2::LEFT_TOP,
+                    &format!("A {name_a}  ↔  B {name_b}  ({:.0} % B)", c.split * 100.0),
+                );
+            }
+        }
     }
 
     fn draw_placeholder(&self, ui: &mut egui::Ui) {
@@ -449,6 +653,9 @@ impl PlayerApp {
     fn draw_menu(&mut self, ctx: &egui::Context) {
         let (mut open, mut new_win, mut png, mut full, mut help, mut sync) =
             (false, false, false, false, false, false);
+        let (mut cmp_toggle, mut cmp_mode) = (false, false);
+        let compare_state = self.compare.as_ref().map(|c| c.mode.label());
+        let has_a = self.player.is_some();
         let has_frame = self.player.as_ref().is_some_and(|p| p.current.is_some());
         egui::Area::new(egui::Id::new("menu"))
             .anchor(Align2::RIGHT_TOP, [-14.0, 14.0])
@@ -482,12 +689,26 @@ impl PlayerApp {
                                 "Wiedergabe mit anderen FrameScope-Fenstern synchronisieren (Y, Umschalt+Y: Versatz abgleichen)",
                                 true,
                             );
+                            cmp_toggle = menu_button(
+                                ui,
+                                if compare_state.is_some() { "Vergleich beenden" } else { "Vergleichen…" },
+                                "Zweites Video B zum Vergleich öffnen (Strg+B)",
+                                has_a,
+                            );
+                            if let Some(label) = compare_state {
+                                cmp_mode = menu_button(
+                                    ui,
+                                    &format!("Modus: {label}"),
+                                    "Vergleichsmodus wechseln (C): Schieber, Nebeneinander, Überblenden",
+                                    true,
+                                );
+                            }
                             help = menu_button(ui, "?", "Tastenkürzel (F1)", true);
                         });
                     });
             });
         if open {
-            self.open_dialog(ctx);
+            self.open_dialog(ctx, false);
         }
         if new_win {
             self.new_window();
@@ -503,6 +724,18 @@ impl PlayerApp {
         }
         if sync {
             self.toggle_sync(ctx);
+        }
+        if cmp_toggle {
+            if self.compare.is_some() {
+                self.close_compare(ctx);
+            } else {
+                self.open_dialog(ctx, true);
+            }
+        }
+        if cmp_mode {
+            if let Some(c) = self.compare.as_mut() {
+                c.mode = c.mode.next();
+            }
         }
     }
 
@@ -560,6 +793,7 @@ impl PlayerApp {
             ("S  ·  Umschalt + S", "Frame als PNG  ·  Ordner wählen"),
             ("F  ·  Esc", "Vollbild  ·  beenden"),
             ("H", "Info-Overlay (Frame, Timecode, KEY)"),
+            ("Strg + B  ·  C", "Vergleich mit Video B  ·  Modus wechseln"),
             (
                 "Y  ·  Umschalt + Y",
                 "Sync mit anderen Fenstern  ·  Versatz abgleichen",
@@ -656,6 +890,10 @@ impl PlayerApp {
     }
 
     fn draw_controls(&mut self, ctx: &egui::Context) {
+        let b_txt = self
+            .compare
+            .as_ref()
+            .map(|c| format!("B {}", frame_texts(&c.player).0));
         let sync_txt = if self.sync.enabled {
             format!(
                 " · Sync ({}){}",
@@ -715,6 +953,9 @@ impl PlayerApp {
                                     .color(Color32::BLACK)
                                     .background_color(ui::KEY),
                             );
+                        }
+                        if let Some(b) = &b_txt {
+                            ui.label(RichText::new(b).monospace().size(13.0).color(ui::TEXT_DIM));
                         }
                         ui.add_space(6.0);
                         let loop_btn = ui
@@ -776,17 +1017,21 @@ impl PlayerApp {
                                 "{}×{} · {} · {:.3} fps{keys}{clock}{dropped}{sync_txt}",
                                 i.width, i.height, i.codec, i.fps
                             );
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    ui.label(
-                                        RichText::new(text)
-                                            .monospace()
-                                            .size(12.0)
-                                            .color(ui::TEXT_DIM),
-                                    );
-                                },
-                            );
+                            // Bei schmalen Fenstern weglassen, statt andere Bedienelemente zu überlappen.
+                            let needed = text.chars().count() as f32 * 7.6 + 24.0;
+                            if ui.available_width() > needed {
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        ui.label(
+                                            RichText::new(text)
+                                                .monospace()
+                                                .size(12.0)
+                                                .color(ui::TEXT_DIM),
+                                        );
+                                    },
+                                );
+                            }
                         }
                     });
                     let w = ui.available_width();
@@ -849,7 +1094,8 @@ impl eframe::App for PlayerApp {
         if self.player.is_none() {
             self.sync.update(None);
         }
-        self.upload_texture(&ctx);
+        self.update_compare(&ctx);
+        self.upload_textures(&ctx);
 
         let (time, moved) = ctx.input(|i| {
             (
@@ -908,4 +1154,40 @@ impl eframe::App for PlayerApp {
         }
         s.save();
     }
+}
+
+/// Lädt `frame` als Textur hoch (nur, wenn es nicht schon die aktuelle Textur ist).
+fn upload(
+    ctx: &egui::Context,
+    frame: &Arc<Frame>,
+    tex: &mut Option<egui::TextureHandle>,
+    uploaded: &mut Option<Arc<Frame>>,
+    name: &str,
+) {
+    if tex.is_some() && uploaded.as_ref().is_some_and(|u| Arc::ptr_eq(u, frame)) {
+        return;
+    }
+    // RGBA ist opak (Alpha 255) → unmultiplied == premultiplied, direkter Cast ohne Pixelschleife.
+    let pixels: Vec<Color32> = bytemuck::cast_slice(&frame.rgba).to_vec();
+    let image = egui::ColorImage::new([frame.width, frame.height], pixels);
+    match tex.as_mut() {
+        Some(t) => t.set(image, TextureOptions::LINEAR),
+        None => *tex = Some(ctx.load_texture(name, image, TextureOptions::LINEAR)),
+    }
+    *uploaded = Some(frame.clone());
+}
+
+fn file_label(path: &std::path::Path) -> String {
+    path.file_name()
+        .map_or_else(|| "Video".into(), |n| n.to_string_lossy().into_owned())
+}
+
+/// Kleine halbtransparente Beschriftung (A/B-Label im Vergleich).
+fn chip(painter: &egui::Painter, pos: egui::Pos2, anchor: Align2, text: &str) {
+    let galley =
+        painter.layout_no_wrap(text.to_owned(), egui::FontId::proportional(13.0), ui::TEXT);
+    let size = galley.size() + Vec2::new(14.0, 8.0);
+    let rect = anchor.anchor_size(pos, size);
+    painter.rect_filled(rect, 6.0, Color32::from_black_alpha(150));
+    painter.galley(rect.min + Vec2::new(7.0, 4.0), galley, ui::TEXT);
 }
