@@ -5,6 +5,8 @@ Alle nennenswerten Änderungen an FrameScope. Das Format folgt
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-08
+
 ### Hinzugefügt
 - A/B-Vergleich zweier Videos in einem Fenster (`Strg+B`, `framescope.exe A B`): Schieber, Nebeneinander, Überblenden (`C`); Video B läuft auf der Uhr von A.
 - Synchronisierte Wiedergabe mehrerer Fenster (`Y`): Play/Pause, Scrubbing, Einzelbild, Keyframe- und Loop-Sprünge, frame-genau im Pausenzustand; Versatz-Abgleich (`Umschalt+Y`); `--sync` auf der Kommandozeile.
@@ -33,5 +35,6 @@ Erste Version.
 - Dunkle, minimalistische Oberfläche mit ein-/ausblendbaren Controls, Fenster- und EXE-Icon.
 - Korrekte Farbmatrix (BT.601/709/2020) bei der YUV→RGB-Umrechnung.
 
-[Unreleased]: https://github.com/supaeasy/framescope/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/supaeasy/framescope/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/supaeasy/framescope/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/supaeasy/framescope/releases/tag/v0.1.0
