@@ -3,8 +3,10 @@
 mod app;
 mod audio;
 mod decoder;
+mod export;
 mod index;
 mod player;
+mod settings;
 mod timecode;
 mod timeline;
 mod ui;

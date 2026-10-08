@@ -20,6 +20,11 @@ const MAX_WAIT_FRAMES: usize = 120;
 
 pub struct Player {
     handle: DecoderHandle,
+    pub path: PathBuf,
+    /// Loop-Bereich (Frame-Nummern, inklusive) und Schalter.
+    pub loop_in: Option<usize>,
+    pub loop_out: Option<usize>,
+    pub loop_on: bool,
     pub info: Option<VideoInfo>,
     pub index: Option<Arc<FrameIndex>>,
     /// Keyframe-Positionen als Anteil der Dauer (für die Timeline).
@@ -53,7 +58,11 @@ impl Player {
     ) -> Self {
         let audio = AudioEngine::start(&path, volume, muted);
         Self {
-            handle: DecoderHandle::spawn(path, wake),
+            handle: DecoderHandle::spawn(path.clone(), wake),
+            path,
+            loop_in: None,
+            loop_out: None,
+            loop_on: false,
             info: None,
             index: None,
             key_fracs: Vec::new(),
@@ -150,9 +159,16 @@ impl Player {
                 self.target = None;
                 self.base_pos = frame.pts;
                 self.base_time = Instant::now();
-            } else if !(self.playing && frame.pts <= self.position()) {
-                self.pending = Some(frame);
-                break;
+            } else {
+                let due = self.playing && frame.pts <= self.position();
+                if due && self.loop_end_reached(frame.pts) {
+                    self.loop_jump();
+                    continue;
+                }
+                if !due {
+                    self.pending = Some(frame);
+                    break;
+                }
             }
             self.stream_shown = frame.pts;
             self.current = Some(frame);
@@ -162,10 +178,74 @@ impl Player {
         self.sync_audio();
         // Ende erreicht und letzter Frame angezeigt → stoppen.
         if self.eof && self.pending.is_none() && self.playing && self.target.is_none() {
-            self.base_pos = self.current.as_ref().map_or(self.base_pos, |c| c.pts);
-            self.playing = false;
+            if self.loop_on {
+                self.loop_jump();
+            } else {
+                self.base_pos = self.current.as_ref().map_or(self.base_pos, |c| c.pts);
+                self.playing = false;
+            }
         }
         changed
+    }
+
+    /// Zeit, ab der die Wiedergabe am Loop-Ende umspringt (`None` = Streamende).
+    fn loop_end_time(&self) -> Option<f64> {
+        let idx = self.index.as_ref()?;
+        idx.pts_of(self.loop_out? + 1)
+    }
+
+    /// Ist `pts` (ein fälliger Frame) hinter dem Loop-Ende?
+    fn loop_end_reached(&self, pts: f64) -> bool {
+        self.loop_on && self.loop_end_time().is_some_and(|end| pts >= end - EPS)
+    }
+
+    /// Springt zum Loop-Anfang (oder Videostart) und spielt weiter.
+    fn loop_jump(&mut self) {
+        let Some(idx) = self.index.clone() else {
+            return;
+        };
+        let start = self.loop_in.unwrap_or(0);
+        if let Some(t) = idx.pts_of(start) {
+            self.hard_seek(t, t);
+        }
+    }
+
+    pub fn set_loop_in(&mut self) {
+        if let Some(n) = self.frame_no() {
+            self.loop_in = Some(n);
+            if self.loop_out.is_some_and(|o| o < n) {
+                self.loop_out = None;
+            }
+        }
+    }
+
+    pub fn set_loop_out(&mut self) {
+        if let Some(n) = self.frame_no() {
+            self.loop_out = Some(n);
+            if self.loop_in.is_some_and(|i| i > n) {
+                self.loop_in = None;
+            }
+        }
+    }
+
+    pub fn clear_loop(&mut self) {
+        self.loop_in = None;
+        self.loop_out = None;
+    }
+
+    /// Loop-Bereich als Anteile der Dauer (nur, wenn mindestens ein Marker gesetzt ist).
+    pub fn loop_band(&self) -> Option<(f32, f32)> {
+        let idx = self.index.as_ref()?;
+        let dur = self.duration();
+        if (self.loop_in.is_none() && self.loop_out.is_none()) || dur <= 0.0 {
+            return None;
+        }
+        let start = self.loop_in.and_then(|i| idx.pts_of(i)).unwrap_or(0.0);
+        let end = self
+            .loop_out
+            .and_then(|o| idx.pts_of(o + 1).or(Some(dur)))
+            .unwrap_or(dur);
+        Some(((start / dur) as f32, (end / dur).min(1.0) as f32))
     }
 
     fn fill_key_fracs(&mut self) {
