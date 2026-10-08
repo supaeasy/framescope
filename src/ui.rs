@@ -30,6 +30,8 @@ pub fn apply_theme(ctx: &egui::Context) {
 pub enum Icon {
     Play,
     Pause,
+    Speaker,
+    SpeakerMuted,
 }
 
 /// Runder, dezenter Icon-Button.
@@ -50,6 +52,49 @@ pub fn icon_button(ui: &mut egui::Ui, icon: Icon, size: f32) -> Response {
             ];
             ui.painter()
                 .add(Shape::convex_polygon(pts, TEXT, Stroke::NONE));
+        }
+        Icon::Speaker | Icon::SpeakerMuted => {
+            let r = size * 0.2;
+            let body =
+                Rect::from_center_size(Pos2::new(c.x - r * 1.1, c.y), Vec2::new(r * 0.9, r * 1.2));
+            ui.painter().rect_filled(body, 1.0, TEXT);
+            let cone = vec![
+                Pos2::new(c.x - r * 0.7, c.y - r * 0.6),
+                Pos2::new(c.x + r * 0.3, c.y - r * 1.4),
+                Pos2::new(c.x + r * 0.3, c.y + r * 1.4),
+                Pos2::new(c.x - r * 0.7, c.y + r * 0.6),
+            ];
+            ui.painter()
+                .add(Shape::convex_polygon(cone, TEXT, Stroke::NONE));
+            let stroke = Stroke::new(
+                1.6,
+                if matches!(icon, Icon::Speaker) {
+                    TEXT
+                } else {
+                    TEXT_DIM
+                },
+            );
+            if matches!(icon, Icon::Speaker) {
+                for k in [1.0f32, 1.9] {
+                    let arc: Vec<Pos2> = (-4..=4)
+                        .map(|i| {
+                            let a = i as f32 * 0.16;
+                            Pos2::new(
+                                c.x + r * 0.6 + r * k * a.cos() * 0.8,
+                                c.y + r * k * a.sin() * 0.8,
+                            )
+                        })
+                        .collect();
+                    ui.painter().add(Shape::line(arc, stroke));
+                }
+            } else {
+                let o = Pos2::new(c.x + r * 1.6, c.y);
+                let d = r * 0.8;
+                ui.painter()
+                    .line_segment([o + Vec2::new(-d, -d), o + Vec2::new(d, d)], stroke);
+                ui.painter()
+                    .line_segment([o + Vec2::new(-d, d), o + Vec2::new(d, -d)], stroke);
+            }
         }
         Icon::Pause => {
             for dx in [-r * 0.6, r * 0.6] {

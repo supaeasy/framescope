@@ -13,6 +13,8 @@ const CONTROLS_TIMEOUT: f64 = 2.5;
 
 pub struct PlayerApp {
     player: Option<Player>,
+    volume: f32,
+    muted: bool,
     error: Option<String>,
     texture: Option<egui::TextureHandle>,
     last_activity: f64,
@@ -25,6 +27,8 @@ impl PlayerApp {
         let (open_tx, open_rx) = unbounded();
         let mut app = Self {
             player: None,
+            volume: 0.8,
+            muted: false,
             error: None,
             texture: None,
             last_activity: 0.0,
@@ -46,7 +50,12 @@ impl PlayerApp {
             path.file_name()
                 .map_or_else(|| "Video".into(), |n| n.to_string_lossy())
         )));
-        self.player = Some(Player::new(path, move || wake_ctx.request_repaint()));
+        self.player = Some(Player::new(
+            path,
+            move || wake_ctx.request_repaint(),
+            self.volume,
+            self.muted,
+        ));
     }
 
     /// Dateidialog in eigenem Thread, damit das Fenster nicht blockiert.
@@ -97,6 +106,9 @@ impl PlayerApp {
             key_fwd: usize,
             back: usize,
             fwd: usize,
+            mute: bool,
+            vol_up: usize,
+            vol_down: usize,
         }
         // Zählt Tastendrücke (inkl. Wiederholungen) und verbraucht sie.
         fn presses(i: &mut egui::InputState, mods: Modifiers, key: Key) -> usize {
@@ -125,6 +137,9 @@ impl PlayerApp {
             key_fwd: presses(i, Modifiers::SHIFT, Key::ArrowRight),
             back: presses(i, Modifiers::NONE, Key::ArrowLeft),
             fwd: presses(i, Modifiers::NONE, Key::ArrowRight),
+            mute: i.consume_key(Modifiers::NONE, Key::M),
+            vol_up: presses(i, Modifiers::NONE, Key::ArrowUp),
+            vol_down: presses(i, Modifiers::NONE, Key::ArrowDown),
         });
         if let Some(path) = k.dropped {
             self.open(ctx, path);
@@ -138,7 +153,17 @@ impl PlayerApp {
         while let Ok(path) = self.open_rx.try_recv() {
             self.open(ctx, path);
         }
+        if k.mute {
+            self.muted = !self.muted;
+        }
+        if k.vol_up != k.vol_down {
+            let delta = (k.vol_up as f32 - k.vol_down as f32) * 0.05;
+            self.volume = (self.volume + delta).clamp(0.0, 1.0);
+            self.muted = false;
+        }
         if let Some(p) = self.player.as_mut() {
+            p.set_volume(self.volume);
+            p.set_muted(self.muted);
             if k.space {
                 p.toggle();
             }
@@ -246,12 +271,36 @@ impl PlayerApp {
                                     .background_color(ui::KEY),
                             );
                         }
+                        if p.has_audio() {
+                            let icon = if self.muted || self.volume <= 0.0 {
+                                ui::Icon::SpeakerMuted
+                            } else {
+                                ui::Icon::Speaker
+                            };
+                            if ui::icon_button(ui, icon, 30.0).clicked() {
+                                self.muted = !self.muted;
+                            }
+                            ui.spacing_mut().slider_width = 80.0;
+                            let mut vol = self.volume;
+                            if ui
+                                .add(egui::Slider::new(&mut vol, 0.0..=1.0).show_value(false))
+                                .changed()
+                            {
+                                self.volume = vol;
+                                self.muted = false;
+                            }
+                        }
                         if let Some(i) = &p.info {
+                            let clock = if p.audio_is_master() {
+                                " · Audio-Clock"
+                            } else {
+                                ""
+                            };
                             let keys = p.index.as_ref().map_or(String::new(), |x| {
                                 format!(" · {} Keyframes", x.key_count())
                             });
                             let text = format!(
-                                "{}×{} · {} · {:.3} fps{keys}",
+                                "{}×{} · {} · {:.3} fps{keys}{clock}",
                                 i.width, i.height, i.codec, i.fps
                             );
                             ui.with_layout(

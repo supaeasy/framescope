@@ -4,6 +4,7 @@
 //! Präsentationsreihenfolge. Zeitstempel stammen aus derselben Berechnung wie im
 //! Frame-Index und lassen sich daher exakt vergleichen (Toleranz `EPS`).
 
+use crate::audio::AudioEngine;
 use crate::decoder::{Command, DecoderHandle, Event, Frame, VideoInfo};
 use crate::index::FrameIndex;
 use std::collections::VecDeque;
@@ -38,10 +39,19 @@ pub struct Player {
     stream_shown: f64,
     cache: VecDeque<Arc<Frame>>,
     eof: bool,
+    audio: Option<AudioEngine>,
+    pub volume: f32,
+    pub muted: bool,
 }
 
 impl Player {
-    pub fn new(path: PathBuf, wake: impl Fn() + Send + Sync + Clone + 'static) -> Self {
+    pub fn new(
+        path: PathBuf,
+        wake: impl Fn() + Send + Sync + Clone + 'static,
+        volume: f32,
+        muted: bool,
+    ) -> Self {
+        let audio = AudioEngine::start(&path, volume, muted);
         Self {
             handle: DecoderHandle::spawn(path, wake),
             info: None,
@@ -59,6 +69,9 @@ impl Player {
             stream_shown: f64::NAN,
             cache: VecDeque::new(),
             eof: false,
+            audio,
+            volume,
+            muted,
         }
     }
 
@@ -77,7 +90,11 @@ impl Player {
     /// Aktuelle Wiedergabeposition in Sekunden.
     pub fn position(&self) -> f64 {
         if self.playing && self.target.is_none() {
-            self.base_pos + self.base_time.elapsed().as_secs_f64()
+            // Audio ist Master-Clock; ohne Ton läuft die Systemuhr.
+            self.audio
+                .as_ref()
+                .and_then(AudioEngine::clock)
+                .unwrap_or_else(|| self.base_pos + self.base_time.elapsed().as_secs_f64())
         } else {
             self.base_pos
         }
@@ -142,6 +159,7 @@ impl Player {
             changed = true;
         }
         self.fill_key_fracs();
+        self.sync_audio();
         // Ende erreicht und letzter Frame angezeigt → stoppen.
         if self.eof && self.pending.is_none() && self.playing && self.target.is_none() {
             self.base_pos = self.current.as_ref().map_or(self.base_pos, |c| c.pts);
@@ -211,6 +229,9 @@ impl Player {
         self.stream_pts = from - 1.0;
         self.base_pos = time;
         self.base_time = Instant::now();
+        if let Some(a) = &self.audio {
+            a.seek(self.serial, time);
+        }
         let _ = self.handle.cmd.send(Command::Seek {
             serial: self.serial,
             from: from - EPS,
@@ -313,6 +334,39 @@ impl Player {
         self.base_pos = self.position();
         self.base_time = Instant::now();
         self.playing = play;
+        self.sync_audio();
+    }
+
+    /// Ton läuft nur, wenn abgespielt wird und der Zielframe bereits angezeigt ist.
+    fn sync_audio(&self) {
+        if let Some(a) = &self.audio {
+            a.set_playing(self.playing && self.target.is_none());
+        }
+    }
+
+    /// Führt gerade die Audio-Clock die Wiedergabe?
+    pub fn audio_is_master(&self) -> bool {
+        self.playing
+            && self.target.is_none()
+            && self.audio.as_ref().is_some_and(|a| a.clock().is_some())
+    }
+
+    pub fn has_audio(&self) -> bool {
+        self.audio.is_some()
+    }
+
+    pub fn set_volume(&mut self, v: f32) {
+        self.volume = v.clamp(0.0, 1.0);
+        if let Some(a) = &self.audio {
+            a.set_volume(self.volume);
+        }
+    }
+
+    pub fn set_muted(&mut self, m: bool) {
+        self.muted = m;
+        if let Some(a) = &self.audio {
+            a.set_muted(m);
+        }
     }
 
     pub fn toggle(&mut self) {

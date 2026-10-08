@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod app;
+mod audio;
 mod decoder;
 mod index;
 mod player;
@@ -13,6 +14,15 @@ use std::path::PathBuf;
 fn main() -> anyhow::Result<()> {
     ffmpeg_next::init()?;
     ffmpeg_next::util::log::set_level(ffmpeg_next::util::log::Level::Error);
+
+    let mut args = std::env::args_os().skip(1);
+    if args.next().is_some_and(|a| a == "--audio-selftest") {
+        let path = args
+            .next()
+            .map(PathBuf::from)
+            .ok_or_else(|| anyhow::anyhow!("Datei fehlt"))?;
+        return audio::selftest(&path);
+    }
 
     // Optionales Kommandozeilenargument: Videodatei.
     let initial: Option<PathBuf> = std::env::args_os().nth(1).map(PathBuf::from);
