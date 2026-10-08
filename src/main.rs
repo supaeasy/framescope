@@ -7,6 +7,7 @@ mod export;
 mod index;
 mod player;
 mod settings;
+mod sync;
 mod timecode;
 mod timeline;
 mod ui;
@@ -43,7 +44,16 @@ fn main() -> anyhow::Result<()> {
     }
 
     // Optionales Kommandozeilenargument: Videodatei.
-    let initial: Option<PathBuf> = std::env::args_os().nth(1).map(PathBuf::from);
+    // Kommandozeile: [--sync] [Videodatei]
+    let mut sync = false;
+    let mut initial: Option<PathBuf> = None;
+    for arg in std::env::args_os().skip(1) {
+        if arg == "--sync" {
+            sync = true;
+        } else if initial.is_none() {
+            initial = Some(PathBuf::from(arg));
+        }
+    }
 
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
@@ -59,7 +69,7 @@ fn main() -> anyhow::Result<()> {
         options,
         Box::new(move |cc| {
             ui::apply_theme(&cc.egui_ctx);
-            Ok(Box::new(app::PlayerApp::new(cc, initial)))
+            Ok(Box::new(app::PlayerApp::new(cc, initial, sync)))
         }),
     )
     .map_err(|e| anyhow::anyhow!("UI-Fehler: {e}"))

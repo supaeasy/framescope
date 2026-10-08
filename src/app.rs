@@ -2,6 +2,7 @@
 
 use crate::player::Player;
 use crate::settings::Settings;
+use crate::sync::SyncController;
 use crate::timeline::LoopBand;
 use crate::{export, timecode, timeline, ui};
 use crossbeam_channel::{unbounded, Receiver, Sender};
@@ -34,6 +35,7 @@ pub struct PlayerApp {
     muted: bool,
     hud: bool,
     help: bool,
+    sync: SyncController,
     error: Option<String>,
     texture: Option<egui::TextureHandle>,
     last_activity: f64,
@@ -46,7 +48,11 @@ pub struct PlayerApp {
 }
 
 impl PlayerApp {
-    pub fn new(cc: &eframe::CreationContext<'_>, initial: Option<PathBuf>) -> Self {
+    pub fn new(
+        cc: &eframe::CreationContext<'_>,
+        initial: Option<PathBuf>,
+        sync_on_start: bool,
+    ) -> Self {
         let (msg_tx, msg_rx) = unbounded();
         let settings = Settings::load();
         let mut app = Self {
@@ -55,6 +61,10 @@ impl PlayerApp {
             muted: settings.muted,
             hud: settings.hud,
             help: false,
+            sync: SyncController::new({
+                let ctx = cc.egui_ctx.clone();
+                move || ctx.request_repaint()
+            }),
             settings,
             export_dir_changed: false,
             error: None,
@@ -69,6 +79,7 @@ impl PlayerApp {
                 .and_then(|v| v.parse::<f64>().ok())
                 .map(|secs| (secs, -1.0)),
         };
+        app.sync.set_enabled(sync_on_start, None);
         if let Some(path) = initial {
             app.open(&cc.egui_ctx, path);
         }
@@ -107,9 +118,51 @@ impl PlayerApp {
         });
     }
 
-    fn new_window() {
+    /// Startet eine weitere Instanz; läuft Sync, startet sie ebenfalls synchronisiert.
+    fn new_window(&self) {
         if let Ok(exe) = std::env::current_exe() {
-            let _ = std::process::Command::new(exe).spawn();
+            let mut cmd = std::process::Command::new(exe);
+            if self.sync.enabled {
+                cmd.arg("--sync");
+            }
+            let _ = cmd.spawn();
+        }
+    }
+
+    fn toast(&mut self, ctx: &egui::Context, text: impl Into<String>, error: bool) {
+        let now = ctx.input(|i| i.time);
+        self.toast = Some((text.into(), error, now + TOAST_SECS));
+    }
+
+    fn toggle_sync(&mut self, ctx: &egui::Context) {
+        if !self.sync.available() {
+            self.toast(ctx, "Sync nicht verfügbar (keine freie Verbindung)", true);
+            return;
+        }
+        let on = !self.sync.enabled;
+        self.sync.set_enabled(on, self.player.as_ref());
+        let text = if on { "Sync an" } else { "Sync aus" };
+        self.toast(ctx, text, false);
+    }
+
+    /// Versatz so setzen, dass die aktuelle Position der des Sync-Partners entspricht.
+    fn align_sync(&mut self, ctx: &egui::Context) {
+        let Some(pos) = self.player.as_ref().map(Player::position) else {
+            return;
+        };
+        if self.sync.align(pos) {
+            let offset = self.sync.offset;
+            self.toast(
+                ctx,
+                format!("Sync abgeglichen (Versatz {offset:+.3} s)"),
+                false,
+            );
+        } else {
+            self.toast(
+                ctx,
+                "Kein Sync-Partner gefunden (Sync bei beiden Fenstern einschalten)",
+                true,
+            );
         }
     }
 
@@ -225,6 +278,8 @@ impl PlayerApp {
             escape: bool,
             hud: bool,
             help: bool,
+            sync: bool,
+            sync_align: bool,
         }
         // Zählt Tastendrücke (inkl. Wiederholungen) und verbraucht sie.
         fn presses(i: &mut egui::InputState, mods: Modifiers, key: Key) -> usize {
@@ -266,6 +321,8 @@ impl PlayerApp {
             escape: i.consume_key(Modifiers::NONE, Key::Escape),
             hud: i.consume_key(Modifiers::NONE, Key::H),
             help: i.consume_key(Modifiers::NONE, Key::F1),
+            sync_align: i.consume_key(Modifiers::SHIFT, Key::Y),
+            sync: i.consume_key(Modifiers::NONE, Key::Y),
         });
         if let Some(path) = k.dropped {
             self.open(ctx, path);
@@ -274,9 +331,15 @@ impl PlayerApp {
             self.open_dialog(ctx);
         }
         if k.new_win {
-            Self::new_window();
+            self.new_window();
         }
         self.drain_messages(ctx);
+        if k.sync {
+            self.toggle_sync(ctx);
+        }
+        if k.sync_align {
+            self.align_sync(ctx);
+        }
         if k.hud {
             self.hud = !self.hud;
         }
@@ -384,8 +447,8 @@ impl PlayerApp {
 
     /// Dezentes Menü oben rechts: Öffnen, neues Fenster, PNG, Vollbild.
     fn draw_menu(&mut self, ctx: &egui::Context) {
-        let (mut open, mut new_win, mut png, mut full, mut help) =
-            (false, false, false, false, false);
+        let (mut open, mut new_win, mut png, mut full, mut help, mut sync) =
+            (false, false, false, false, false, false);
         let has_frame = self.player.as_ref().is_some_and(|p| p.current.is_some());
         egui::Area::new(egui::Id::new("menu"))
             .anchor(Align2::RIGHT_TOP, [-14.0, 14.0])
@@ -408,6 +471,17 @@ impl PlayerApp {
                                 has_frame,
                             );
                             full = menu_button(ui, "Vollbild", "Vollbild (F, Esc beendet)", true);
+                            let sync_label = if self.sync.enabled {
+                                format!("Sync · {}", self.sync.synced_peers())
+                            } else {
+                                "Sync".to_owned()
+                            };
+                            sync = menu_button(
+                                ui,
+                                &sync_label,
+                                "Wiedergabe mit anderen FrameScope-Fenstern synchronisieren (Y, Umschalt+Y: Versatz abgleichen)",
+                                true,
+                            );
                             help = menu_button(ui, "?", "Tastenkürzel (F1)", true);
                         });
                     });
@@ -416,7 +490,7 @@ impl PlayerApp {
             self.open_dialog(ctx);
         }
         if new_win {
-            Self::new_window();
+            self.new_window();
         }
         if png {
             self.export_png(ctx, false);
@@ -426,6 +500,9 @@ impl PlayerApp {
         }
         if help {
             self.help = !self.help;
+        }
+        if sync {
+            self.toggle_sync(ctx);
         }
     }
 
@@ -483,6 +560,10 @@ impl PlayerApp {
             ("S  ·  Umschalt + S", "Frame als PNG  ·  Ordner wählen"),
             ("F  ·  Esc", "Vollbild  ·  beenden"),
             ("H", "Info-Overlay (Frame, Timecode, KEY)"),
+            (
+                "Y  ·  Umschalt + Y",
+                "Sync mit anderen Fenstern  ·  Versatz abgleichen",
+            ),
             ("Strg + O  ·  Strg + N", "Datei öffnen  ·  Neues Fenster"),
             ("F1", "Diese Hilfe"),
         ];
@@ -575,6 +656,19 @@ impl PlayerApp {
     }
 
     fn draw_controls(&mut self, ctx: &egui::Context) {
+        let sync_txt = if self.sync.enabled {
+            format!(
+                " · Sync ({}){}",
+                self.sync.synced_peers(),
+                if self.sync.offset == 0.0 {
+                    String::new()
+                } else {
+                    format!(" {:+.3}s", self.sync.offset)
+                }
+            )
+        } else {
+            String::new()
+        };
         let Some(p) = self.player.as_mut() else {
             return;
         };
@@ -679,7 +773,7 @@ impl PlayerApp {
                                 format!(" · {} Keyframes", x.key_count())
                             });
                             let text = format!(
-                                "{}×{} · {} · {:.3} fps{keys}{clock}{dropped}",
+                                "{}×{} · {} · {:.3} fps{keys}{clock}{dropped}{sync_txt}",
                                 i.width, i.height, i.codec, i.fps
                             );
                             ui.with_layout(
@@ -746,10 +840,14 @@ impl eframe::App for PlayerApp {
         self.handle_input(&ctx);
         if let Some(p) = self.player.as_mut() {
             p.poll();
+            self.sync.update(Some(p));
             if let Some(e) = p.error.take() {
                 self.error = Some(e);
                 self.player = None;
             }
+        }
+        if self.player.is_none() {
+            self.sync.update(None);
         }
         self.upload_texture(&ctx);
 
@@ -788,6 +886,10 @@ impl eframe::App for PlayerApp {
         self.draw_toast(&ctx);
         self.bench_tick(&ctx, time);
 
+        if self.sync.available() {
+            // Lebenszeichen an andere Instanzen auch im Leerlauf.
+            ctx.request_repaint_after(std::time::Duration::from_secs(1));
+        }
         if playing {
             ctx.request_repaint();
         } else if controls_visible {

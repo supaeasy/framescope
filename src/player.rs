@@ -24,6 +24,11 @@ pub struct Player {
     /// Angezeigte und verworfene (zu spät dekodierte) Frames, für die Performance-Anzeige.
     pub shown: u64,
     pub dropped: u64,
+    /// Zähler für Zustandsänderungen (Play/Pause/Seek/Schritt); dient der Instanz-Synchronisierung.
+    pub events: u64,
+    /// Gemessene Dauer eines Seeks bis zum angezeigten Zielframe (Sekunden, geglättet).
+    seek_latency: f64,
+    seek_started: Option<Instant>,
     /// Loop-Bereich (Frame-Nummern, inklusive) und Schalter.
     pub loop_in: Option<usize>,
     pub loop_out: Option<usize>,
@@ -65,6 +70,9 @@ impl Player {
             path,
             shown: 0,
             dropped: 0,
+            events: 0,
+            seek_latency: 0.15,
+            seek_started: None,
             loop_in: None,
             loop_out: None,
             loop_on: false,
@@ -162,6 +170,10 @@ impl Player {
                     continue; // nur für den Cache (Prefetch vor dem Ziel)
                 }
                 self.target = None;
+                if let Some(started) = self.seek_started.take() {
+                    let measured = started.elapsed().as_secs_f64();
+                    self.seek_latency = (0.7 * self.seek_latency + 0.3 * measured).clamp(0.02, 0.8);
+                }
                 self.base_pos = frame.pts;
                 self.base_time = Instant::now();
             } else {
@@ -192,6 +204,7 @@ impl Player {
             } else {
                 self.base_pos = self.current.as_ref().map_or(self.base_pos, |c| c.pts);
                 self.playing = false;
+                self.events += 1;
             }
         }
         changed
@@ -296,6 +309,7 @@ impl Player {
 
     /// Zeigt `frame` an einem Ziel an, ohne den Decoder-Strom zu berühren.
     fn show_cached(&mut self, frame: Arc<Frame>) {
+        self.events += 1;
         self.base_pos = frame.pts;
         self.base_time = Instant::now();
         self.target = None;
@@ -311,6 +325,8 @@ impl Player {
 
     /// Springt per Decoder zu `time`; liefert ab `from` alle Frames (Prefetch für den Cache).
     fn hard_seek(&mut self, time: f64, from: f64) {
+        self.events += 1;
+        self.seek_started = Some(Instant::now());
         self.serial += 1;
         self.target = Some(time - EPS);
         self.pending = None;
@@ -345,6 +361,7 @@ impl Player {
 
     /// Zeigt Frame `n` an (aus dem Cache, durch Weiterlaufen des Decoders oder per Seek).
     pub fn goto_frame(&mut self, n: usize) {
+        self.events += 1;
         let Some(idx) = self.index.clone() else {
             return;
         };
@@ -411,6 +428,7 @@ impl Player {
         if play == self.playing {
             return;
         }
+        self.events += 1;
         if let (true, true, false, Some(cur)) = (
             play,
             self.target.is_none(),
@@ -455,6 +473,47 @@ impl Player {
         self.muted = m;
         if let Some(a) = &self.audio {
             a.set_muted(m);
+        }
+    }
+
+    /// Folgt einer fremden Instanz: gleiche Position `t` (Sekunden) und gleicher Abspielzustand.
+    /// Beim Abspielen wird nur bei Abweichung über `tol` (und erlaubter Korrektur) gesprungen;
+    /// dabei wird die gemessene Seek-Dauer vorgehalten. Rückgabe: `true`, wenn ein Sprung ausgelöst wurde.
+    pub fn follow(&mut self, t: f64, playing: bool, tol: f64, may_correct: bool) -> bool {
+        let dur = self.duration();
+        let t = if dur > 0.0 {
+            t.clamp(0.0, dur)
+        } else {
+            t.max(0.0)
+        };
+        if playing {
+            let off = if self.playing {
+                (self.position() - t).abs()
+            } else {
+                f64::INFINITY
+            };
+            if self.playing && !(off > tol && may_correct) {
+                return false;
+            }
+            let was_playing = self.playing;
+            self.seek_time(t + self.seek_latency);
+            if !was_playing {
+                self.set_playing(true);
+            }
+            true
+        } else {
+            if self.playing {
+                self.set_playing(false);
+            }
+            let Some(idx) = self.index.clone() else {
+                return false;
+            };
+            let n = idx.frame_at(t);
+            if self.frame_no() == Some(n) && self.target.is_none() {
+                return false;
+            }
+            self.goto_frame(n);
+            true
         }
     }
 

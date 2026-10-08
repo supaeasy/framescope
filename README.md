@@ -17,6 +17,7 @@ geschrieben in Rust. Kein Installer, keine Registry-Einträge, keine Daten in `%
 - **PNG-Export** des aktuellen Frames in voller Originalauflösung (`S`)
 - **Audio** mit Audio als Master-Clock (A/V-Sync), Lautstärke und Mute
 - **Mehrere Instanzen** zum Vergleichen: jedes Fenster ist ein eigener Prozess (`Strg+N`)
+- **Synchronisierte Wiedergabe** mehrerer Fenster (Play, Pause, Seek, Einzelbild, Loop-Sprünge)
 - **Portable** und **Dark-UI**: Controls blenden sich bei Inaktivität aus, Video im Vordergrund
 
 ## Bedienung
@@ -34,6 +35,8 @@ geschrieben in Rust. Kein Installer, keine Registry-Einträge, keine Daten in `%
 | `M` | Stumm |
 | `↑` / `↓` | Lautstärke ±5 % |
 | `F` / `Esc` / Doppelklick | Vollbild |
+| `Y` | Wiedergabe mit anderen FrameScope-Fenstern **synchronisieren** (an/aus) |
+| `Umschalt` + `Y` | Sync-Versatz abgleichen (siehe unten) |
 | `H` | Dauerhaftes Info-Overlay (Frame, Timecode, KEY) oben links |
 | `Strg` + `O` | Datei öffnen |
 | `Strg` + `N` | Neues Fenster (weitere Instanz) |
@@ -58,6 +61,23 @@ framescope.exe "C:\Videos\clip.mp4"
   die Wiedergabe läuft sofort.
 - Rückwärts-Schritte kommen aus einem Frame-Cache; bei einem Cache-Miss wird zum vorherigen Keyframe gesprungen und
   vorwärts bis zum Zielframe dekodiert.
+
+### Synchronisierte Wiedergabe (mehrere Fenster)
+
+Mit `Y` (oder dem Button **Sync** oben rechts) nimmt ein Fenster an der Synchronisierung teil. Alle Fenster mit
+aktiviertem Sync folgen demjenigen, das **zuletzt bedient** wurde: Play/Pause, Scrubbing, Einzelbild-Schritte,
+Keyframe-Sprünge und Loop-Sprünge. Beim Abspielen sendet der Führende zweimal pro Sekunde seine Position;
+weicht ein Fenster um mehr als 0,1 s ab, springt es nach (mit Vorhalt für die gemessene Seek-Dauer). Im Pausenzustand
+landen alle Fenster **frame-genau** auf demselben Zeitpunkt (bei unterschiedlicher Framerate: auf dem letzten
+Frame bis zu dieser Zeit).
+
+- **Neues Fenster** (`Strg+N`) startet automatisch mit Sync, wenn Sync im aktuellen Fenster läuft.
+  Per Kommandozeile: `framescope.exe --sync "clip.mp4"`.
+- **Versatz abgleichen:** Haben die Videos unterschiedliche Startpunkte, gehe in beiden Fenstern an dieselbe Szene
+  (Sync dazu kurz ausschalten oder erst Fenster A einstellen), schalte Sync ein und drücke im anderen Fenster
+  `Umschalt+Y`. Ab dann gilt ein fester Versatz (in der Infozeile als `Sync (n) +1.234s` zu sehen).
+- Technik: UDP auf `127.0.0.1` (Ports 47600–47663, höchstens 64 Fenster) – keine Firewall-Abfrage, keine Dateien,
+  keine Registry; es werden keine Daten ins Netzwerk gesendet.
 
 ### Einstellungen
 

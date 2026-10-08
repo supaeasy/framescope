@@ -5,6 +5,10 @@ Alle nennenswerten Änderungen an FrameScope. Das Format folgt
 
 ## [Unreleased]
 
+### Hinzugefügt
+- Synchronisierte Wiedergabe mehrerer Fenster (`Y`): Play/Pause, Scrubbing, Einzelbild, Keyframe- und Loop-Sprünge, frame-genau im Pausenzustand; Versatz-Abgleich (`Umschalt+Y`); `--sync` auf der Kommandozeile.
+- Anzeige verworfener Frames, Entwickler-Flags `--version`, `--bench`, `--audio-selftest`.
+
 ## [0.1.0] - 2026-10-08
 
 Erste Version.
