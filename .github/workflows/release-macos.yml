@@ -43,7 +43,7 @@ jobs:
 
       - name: FFmpeg bauen
         if: steps.ffmpeg.outputs.cache-hit != 'true'
-        run: ./scripts/build-ffmpeg-macos.sh "$HOME/ffmpeg-prefix" "$FFMPEG_VERSION"
+        run: bash scripts/build-ffmpeg-macos.sh "$HOME/ffmpeg-prefix" "$FFMPEG_VERSION"
 
       - name: Version ermitteln
         id: ver
@@ -60,7 +60,7 @@ jobs:
         run: |
           export FFMPEG_PREFIX="$HOME/ffmpeg-prefix"
           mkdir -p dist
-          ./scripts/bundle-macos.sh target/release/framescope "$FFMPEG_PREFIX" "${{ steps.ver.outputs.version }}" dist
+          bash scripts/bundle-macos.sh target/release/framescope "$FFMPEG_PREFIX" "${{ steps.ver.outputs.version }}" dist
           name="framescope-v${{ steps.ver.outputs.version }}-macos-${{ matrix.arch }}-experimental"
           ditto -c -k --keepParent dist/FrameScope.app "dist/$name.zip"
           (cd dist && shasum -a 256 "$name.zip" > "$name.zip.sha256")
