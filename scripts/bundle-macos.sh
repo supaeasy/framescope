@@ -3,6 +3,7 @@
 # und prüft, dass die App startet.
 # Aufruf: scripts/bundle-macos.sh <Binary> <FFmpeg-Prefix> <Version> <Ausgabeordner>
 set -euo pipefail
+trap 'echo "Fehler in Zeile $LINENO" >&2' ERR
 
 BIN="${1:?Binary}"; FF="${2:?FFmpeg-Prefix}"; VERSION="${3:?Version}"; OUT="${4:?Ausgabeordner}"
 APP="$OUT/FrameScope.app"
@@ -17,7 +18,8 @@ chmod +x "$APP/Contents/MacOS/framescope"
 # FFmpeg-Bibliotheken (und deren Abhängigkeiten untereinander) ins Bundle holen und auf @rpath umstellen.
 fix_deps() {
   local file="$1"
-  otool -L "$file" | awk 'NR>1 {print $1}' | grep -E "^${FF}/" | while read -r dep; do
+  # `|| true`: Bibliotheken ohne weitere FFmpeg-Abhängigkeit (z. B. libavutil) liefern keinen Treffer.
+  { otool -L "$file" | awk 'NR>1 {print $1}' | grep -E "^${FF}/" || true; } | while read -r dep; do
     local base; base="$(basename "$dep")"
     if [ ! -f "$FW/$base" ]; then
       cp -L "$dep" "$FW/$base"

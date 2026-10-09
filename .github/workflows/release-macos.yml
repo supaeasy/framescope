@@ -43,7 +43,10 @@ jobs:
 
       - name: FFmpeg bauen
         if: steps.ffmpeg.outputs.cache-hit != 'true'
-        run: bash scripts/build-ffmpeg-macos.sh "$HOME/ffmpeg-prefix" "$FFMPEG_VERSION"
+        run: |
+          # nasm: handoptimierter Assembler-Code von FFmpeg auf Intel-Macs.
+          if [ "$(uname -m)" = "x86_64" ]; then brew install nasm; fi
+          bash scripts/build-ffmpeg-macos.sh "$HOME/ffmpeg-prefix" "$FFMPEG_VERSION"
 
       - name: Version ermitteln
         id: ver
