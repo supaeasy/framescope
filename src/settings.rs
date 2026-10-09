@@ -27,7 +27,16 @@ impl Default for Settings {
 }
 
 fn file_path() -> Option<PathBuf> {
-    Some(std::env::current_exe().ok()?.parent()?.join(FILE_NAME))
+    let exe = std::env::current_exe().ok()?;
+    let mut dir = exe.parent()?.to_path_buf();
+    // macOS-App-Bundle (…/FrameScope.app/Contents/MacOS/framescope): die Datei liegt neben dem
+    // .app, nicht darin (ein Bundle ist signiert und soll nicht verändert werden).
+    if dir.ends_with("Contents/MacOS") {
+        if let Some(outside) = dir.ancestors().nth(3) {
+            dir = outside.to_path_buf();
+        }
+    }
+    Some(dir.join(FILE_NAME))
 }
 
 impl Settings {

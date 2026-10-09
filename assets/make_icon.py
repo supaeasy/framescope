@@ -1,4 +1,4 @@
-"""Erzeugt assets/icon-256.png und assets/icon.ico (Pillow erforderlich)."""
+"""Erzeugt assets/icon-256.png, assets/icon-1024.png und assets/icon.ico (Pillow erforderlich)."""
 from PIL import Image, ImageDraw
 import os
 
@@ -26,6 +26,7 @@ d.ellipse((520 - 34, y - 34, 520 + 34, y + 34), fill=WHITE)
 
 here = os.path.dirname(os.path.abspath(__file__))
 img.resize((256, 256), Image.LANCZOS).save(os.path.join(here, "icon-256.png"))
+img.save(os.path.join(here, "icon-1024.png"))  # Quelle für das macOS-.icns
 sizes = [16, 24, 32, 48, 64, 128, 256]
 img.save(os.path.join(here, "icon.ico"), sizes=[(s, s) for s in sizes])
 print("ok")

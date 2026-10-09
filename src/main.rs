@@ -1,4 +1,4 @@
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod app;
 mod audio;
@@ -69,13 +69,7 @@ fn main() -> anyhow::Result<()> {
             vsync: std::env::var("FRAMESCOPE_NO_VSYNC").is_err(),
             ..Default::default()
         },
-        viewport: eframe::egui::ViewportBuilder::default()
-            .with_title("FrameScope")
-            .with_decorations(false)
-            .with_icon(window_icon())
-            .with_inner_size([1280.0, 720.0])
-            .with_min_inner_size([480.0, 320.0])
-            .with_drag_and_drop(true),
+        viewport: window_viewport(),
         ..Default::default()
     };
     eframe::run_native(
@@ -115,4 +109,23 @@ fn raise_ui_priority() {
         };
         SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
     }
+}
+
+/// Fensteraufbau: ohne Titelleiste. Unter macOS bleiben die nativen Fensterknöpfe (Ampel) über dem Bild
+/// stehen, damit Größenänderung und Schatten des Systems funktionieren; sonst ist das Fenster rahmenlos.
+fn window_viewport() -> eframe::egui::ViewportBuilder {
+    let builder = eframe::egui::ViewportBuilder::default()
+        .with_title("FrameScope")
+        .with_icon(window_icon())
+        .with_inner_size([1280.0, 720.0])
+        .with_min_inner_size([480.0, 320.0])
+        .with_drag_and_drop(true);
+    #[cfg(target_os = "macos")]
+    let builder = builder
+        .with_fullsize_content_view(true)
+        .with_titlebar_shown(false)
+        .with_title_shown(false);
+    #[cfg(not(target_os = "macos"))]
+    let builder = builder.with_decorations(false);
+    builder
 }

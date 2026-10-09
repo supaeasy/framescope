@@ -6,6 +6,7 @@
 
 /// Anzahl Spalten und Zeilen für `n` Fenster: bis drei Fenster übereinander, danach ein
 /// möglichst quadratisches Raster (4 → 2×2, 5–6 → 3×2, 7–9 → 3×3, …).
+#[cfg_attr(not(windows), allow(dead_code))]
 pub fn grid_dims(n: usize) -> (usize, usize) {
     match n {
         0 => (0, 0),
@@ -20,6 +21,7 @@ pub fn grid_dims(n: usize) -> (usize, usize) {
 /// Rechteck `(x, y, breite, höhe)` der Zelle `index` (zeilenweise) im Bereich
 /// `(links, oben, breite, höhe)`. Die Kanten werden gerundet berechnet, damit zwischen
 /// den Zellen keine Lücken entstehen und die letzte Spalte/Zeile den Rest übernimmt.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub fn cell_rect(
     index: usize,
     cols: usize,
@@ -36,6 +38,7 @@ pub fn cell_rect(
 
 /// Größe `(w, h)` so verkleinert (nie vergrößert), dass sie in `(max_w, max_h)` passt;
 /// das Seitenverhältnis bleibt erhalten.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub fn fit_within(w: i32, h: i32, max_w: i32, max_h: i32) -> (i32, i32) {
     if w <= max_w && h <= max_h {
         return (w, h);
@@ -48,6 +51,7 @@ pub fn fit_within(w: i32, h: i32, max_w: i32, max_h: i32) -> (i32, i32) {
 }
 
 /// Verschiebt `pos` so, dass ein Fenster der Länge `size` im Bereich `[min, min + total]` liegt.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub fn clamp_pos(pos: i32, size: i32, min: i32, total: i32) -> i32 {
     pos.min(min + total - size).max(min)
 }

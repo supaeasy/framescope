@@ -266,6 +266,27 @@ impl PlayerApp {
             i32::try_from(w).unwrap_or(i32::MAX),
             i32::try_from(h).unwrap_or(i32::MAX),
         );
+        if !cfg!(windows) {
+            // Ohne Win32: Größe über egui setzen (Punkte = Pixel / Skalierung), passend zum Monitor.
+            let ppp = ctx.pixels_per_point();
+            let mut size = Vec2::new(want_w as f32 / ppp, want_h as f32 / ppp);
+            let mut fitted = false;
+            if let Some(monitor) = ctx.input(|i| i.viewport().monitor_size) {
+                let scale = (monitor.x * 0.95 / size.x).min(monitor.y * 0.9 / size.y);
+                if scale < 1.0 {
+                    size *= scale;
+                    fitted = true;
+                }
+            }
+            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(size));
+            let text = if fitted {
+                format!("Video ({want_w}×{want_h}) größer als der Bildschirm – eingepasst")
+            } else {
+                format!("Originalgröße: {want_w}×{want_h}")
+            };
+            self.toast(ctx, text, false);
+            return;
+        }
         match winutil::fit_own_window(want_w, want_h) {
             Ok((fw, fh)) if (fw, fh) == (want_w, want_h) => {
                 self.toast(ctx, format!("Originalgröße: {fw}×{fh}"), false);
@@ -778,8 +799,8 @@ impl PlayerApp {
             Stroke::new(1.0, ui::alpha(ui::N700, 0.7)),
             egui::StrokeKind::Inside,
         );
-        if self.fullscreen || Self::is_maximized(ctx) {
-            return;
+        if cfg!(target_os = "macos") || self.fullscreen || Self::is_maximized(ctx) {
+            return; // macOS: natives Fenster mit eigenem Rahmen und eigener Größenänderung
         }
         use egui::viewport::ResizeDirection as Dir;
         const EDGE: f32 = 5.0;
@@ -877,7 +898,9 @@ impl PlayerApp {
                     ui.spacing_mut().item_spacing.x = 6.0;
                     open = ui::ghost_button(ui, Some(ui::Glyph::Regular(ph::FOLDER_OPEN)), "", false, "Datei öffnen (Strg+O)").clicked();
                     new_win = ui::ghost_button(ui, Some(ui::Glyph::Regular(ph::BROWSERS)), "", false, "Neues Fenster (Strg+N)").clicked();
+                    if cfg!(windows) {
                     arrange = ui::ghost_button(ui, Some(ui::Glyph::Regular(ph::SQUARES_FOUR)), "", false, "Alle FrameScope-Fenster gleich groß und lückenlos anordnen (G)").clicked();
+                    }
                     if has_a {
                         original = ui::ghost_button(
                             ui,
@@ -918,12 +941,14 @@ impl PlayerApp {
                         "Wiedergabe mit anderen FrameScope-Fenstern synchronisieren (Y, Umschalt+Y: Versatz abgleichen)",
                     )
                     .clicked();
+                    if !cfg!(target_os = "macos") {
                     ui.add_space(8.0);
                     // Fenstersteuerung (das Fenster hat keine Titelleiste).
                     minimize = ui::ghost_button(ui, Some(ui::Glyph::Regular(ph::MINUS)), "", false, "Minimieren").clicked();
                     let max_glyph = if maximized { ph::COPY } else { ph::SQUARE };
                     maximize = ui::ghost_button(ui, Some(ui::Glyph::Regular(max_glyph)), "", false, if maximized { "Wiederherstellen" } else { "Maximieren" }).clicked();
                     close = ui::ghost_button(ui, Some(ui::Glyph::Regular(ph::X)), "", false, "Schließen").clicked();
+                    }
                 });
             });
         if open {
@@ -979,7 +1004,17 @@ impl PlayerApp {
         let (frame_txt, _, tc_txt) = frame_parts(p);
         let key = is_key(p, cur.pts, cur.key);
         egui::Area::new(egui::Id::new("hud"))
-            .anchor(Align2::LEFT_TOP, [14.0, 14.0])
+            .anchor(
+                Align2::LEFT_TOP,
+                [
+                    if cfg!(target_os = "macos") {
+                        84.0
+                    } else {
+                        14.0
+                    },
+                    14.0,
+                ],
+            )
             .order(egui::Order::Foreground)
             .interactable(false)
             .show(ctx, |ui| {

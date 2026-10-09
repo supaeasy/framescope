@@ -1,0 +1,114 @@
+name: Release macOS (experimentell)
+
+# Baut FrameScope für macOS (Apple Silicon und Intel) als ad-hoc signiertes .app im ZIP.
+# Tag `macos-v<Version>-…` veröffentlicht ein Pre-Release; `workflow_dispatch` baut nur (Artefakte).
+
+on:
+  push:
+    tags: ["macos-v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  FFMPEG_VERSION: "9.0.2"
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-15
+          - arch: x86_64
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: macos-${{ matrix.arch }}
+
+      - name: FFmpeg (LGPL) aus dem Cache oder bauen
+        id: ffmpeg
+        uses: actions/cache@v4
+        with:
+          path: ~/ffmpeg-prefix
+          key: ffmpeg-${{ env.FFMPEG_VERSION }}-${{ matrix.arch }}-${{ hashFiles('scripts/build-ffmpeg-macos.sh') }}
+
+      - name: FFmpeg bauen
+        if: steps.ffmpeg.outputs.cache-hit != 'true'
+        run: ./scripts/build-ffmpeg-macos.sh "$HOME/ffmpeg-prefix" "$FFMPEG_VERSION"
+
+      - name: Version ermitteln
+        id: ver
+        run: |
+          version=$(grep -m1 '^version' Cargo.toml | sed -E 's/version *= *"([^"]+)"/\1/')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Release-Build
+        run: |
+          export FFMPEG_DIR="$HOME/ffmpeg-prefix"
+          cargo build --release
+
+      - name: App-Bundle und ZIP
+        run: |
+          export FFMPEG_PREFIX="$HOME/ffmpeg-prefix"
+          mkdir -p dist
+          ./scripts/bundle-macos.sh target/release/framescope "$FFMPEG_PREFIX" "${{ steps.ver.outputs.version }}" dist
+          name="framescope-v${{ steps.ver.outputs.version }}-macos-${{ matrix.arch }}-experimental"
+          ditto -c -k --keepParent dist/FrameScope.app "dist/$name.zip"
+          (cd dist && shasum -a 256 "$name.zip" > "$name.zip.sha256")
+          ls -la dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.arch }}
+          path: |
+            dist/*.zip
+            dist/*.sha256
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/macos-v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Pre-Release anlegen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(grep -m1 '^version' Cargo.toml | sed -E 's/version *= *"([^"]+)"/\1/')
+          cat > notes.md <<NOTES
+          **Experimentelle macOS-Version – ungetestet auf echter Hardware.** Gebaut und auf dem Start geprüft
+          (\`--version\`) in der CI, aber nicht von Hand bedient.
+
+          Quellstand: \`${GITHUB_SHA::7}\` (Version ${version}). Zwei Varianten: **arm64** (Apple Silicon) und **x86_64** (Intel).
+
+          ### Installation
+          1. ZIP entpacken, \`FrameScope.app\` z. B. nach \`Programme\` ziehen.
+          2. Die App ist nur ad hoc signiert (nicht notarisiert). Beim ersten Start: **Rechtsklick → Öffnen** und bestätigen,
+             oder im Terminal: \`xattr -dr com.apple.quarantine /Programme/FrameScope.app\`.
+          3. Videos per Drag & Drop auf das Fenster ziehen oder \`FrameScope.app/Contents/MacOS/framescope Datei.mp4\`.
+
+          ### Bekannte Einschränkungen
+          - Nicht verfügbar: **Fenster anordnen** (nur Windows). Die Hilfe und Tooltips nennen noch \`Strg\`; auf dem Mac gilt \`Cmd\`.
+          - Die Einstellungen (\`framescope.ini\`) liegen neben dem \`.app\`, nicht darin.
+          - Fenster ohne Titelleiste: Die Ampel bleibt über dem Bild; das Info-Overlay liegt daneben.
+          - Kein Hardware-Decoding.
+
+          FFmpeg: unveränderte Quellen von ffmpeg.org, als LGPL-Shared-Build gebaut (Details in \`FrameScope.app/Contents/Resources/licenses/\`).
+          NOTES
+          gh release create "${GITHUB_REF_NAME}" artifacts/*.zip artifacts/*.sha256 \
+            --title "FrameScope ${version} für macOS (experimentell)" --notes-file notes.md --prerelease --verify-tag
