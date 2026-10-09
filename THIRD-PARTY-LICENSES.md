@@ -16,6 +16,11 @@ FrameScope verwendet die Bibliotheken von [FFmpeg](https://ffmpeg.org/) (`libavc
   Build-Skripte und genaue Konfiguration der verwendeten Builds: <https://github.com/BtbN/FFmpeg-Builds>.
 - Die Rust-Anbindung `ffmpeg-next` / `ffmpeg-sys-next` steht unter der WTFPL.
 
+**macOS:** Die Bibliotheken im macOS-App-Paket baut die CI aus den **unveränderten Quellen** von
+<https://ffmpeg.org/releases/> (FFmpeg 9.0.x) als LGPL-Shared-Build (`--disable-gpl --disable-nonfree --enable-shared`,
+ohne externe Bibliotheken); `scripts/build-ffmpeg-macos.sh` im Repository enthält die genaue Konfiguration. Das App-Paket
+liegt im `Contents/Frameworks`-Ordner und lässt sich durch eigene, kompatible Builds ersetzen.
+
 FFmpeg ist eine Marke von Fabrice Bellard, siehe <https://ffmpeg.org/legal.html>.
 
 ## Rust-Bibliotheken

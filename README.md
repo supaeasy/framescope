@@ -137,6 +137,23 @@ Frame bis zu dieser Zeit).
 Einstellungen liegen in `framescope.ini` **neben der EXE** (Lautstärke, Mute, Info-Overlay, PNG-Standardordner).
 Ist der Ordner nicht beschreibbar, läuft FrameScope einfach mit Standardwerten.
 
+## macOS (experimentell)
+
+Es gibt eine **ungetestete** macOS-Version als eigenes Pre-Release (Tag `macos-v…`), für **Apple Silicon (arm64)** und
+**Intel (x86_64)**. Sie wird in der CI gebaut und auf den Start geprüft, aber nicht von Hand bedient – Rückmeldungen sind
+willkommen.
+
+- **Installation:** ZIP entpacken, `FrameScope.app` z. B. nach „Programme“ ziehen. Die App ist nur *ad hoc* signiert
+  (nicht notarisiert): beim ersten Start **Rechtsklick → Öffnen**, oder im Terminal
+  `xattr -dr com.apple.quarantine /Programme/FrameScope.app`.
+- **Unterschiede zu Windows:** Das Fenster behält die native Ampel (Schließen/Minimieren/Zoom) über dem Bild; die
+  Größenänderung übernimmt das System. **Fenster anordnen** gibt es nicht (nur Windows). Die Einstellungsdatei
+  `framescope.ini` liegt **neben** dem `.app`. Hilfe und Tooltips nennen noch `Strg` – auf dem Mac gilt `Cmd`.
+- **FFmpeg:** unveränderte Quellen von ffmpeg.org, in der CI als LGPL-Shared-Build gebaut (`scripts/build-ffmpeg-macos.sh`);
+  die Bauinfo liegt im App-Paket unter `Contents/Resources/licenses/`.
+- **Selbst bauen:** `scripts/build-ffmpeg-macos.sh <Ordner>`, dann `FFMPEG_DIR=<Ordner> cargo build --release` und
+  `scripts/bundle-macos.sh target/release/framescope <Ordner> <Version> dist`.
+
 ## Release-ZIP
 
 `framescope-vX.Y.Z-windows-x64-portable.zip` enthält `framescope.exe`, die FFmpeg-DLLs, README und die Lizenzen.

@@ -5,6 +5,9 @@ Alle nennenswerten Änderungen an FrameScope. Das Format folgt
 
 ## [Unreleased]
 
+### Hinzugefügt
+- **macOS (experimentell, ungetestet):** App-Bundle für Apple Silicon und Intel, ad hoc signiert, mit selbst gebautem LGPL-FFmpeg (eigener Workflow `release-macos.yml`, Pre-Release über Tags `macos-v…`). Native Fenster-Ampel statt eigener Fenstersteuerung, Einstellungen neben dem `.app`; „Fenster anordnen“ nur unter Windows.
+
 ## [0.4.1] - 2026-10-09
 
 ### Behoben
