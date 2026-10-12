@@ -8,6 +8,14 @@ Alle nennenswerten Änderungen an FrameScope. Das Format folgt
 ### Hinzugefügt
 - **macOS (experimentell, ungetestet):** App-Bundle für Apple Silicon und Intel, ad hoc signiert, mit selbst gebautem LGPL-FFmpeg (eigener Workflow `release-macos.yml`, Pre-Release über Tags `macos-v…`). Native Fenster-Ampel statt eigener Fenstersteuerung, Einstellungen neben dem `.app`; „Fenster anordnen“ nur unter Windows.
 
+## [0.4.2] - 2026-10-12
+
+### Geändert
+- Die Tastenkürzel-Übersicht (F1) zeigt die Versionsnummer.
+- Eckige Fensterecken: die von Windows 11 abgerundeten Ecken sind abgeschaltet, damit das Video vollständig sichtbar ist.
+- Kein Fensterrand mehr, wenn die Bedienelemente ausgeblendet sind (und nie im Vollbild).
+- Der Bereich um das Video (Letterbox) ist jetzt schwarz.
+
 ## [0.4.1] - 2026-10-09
 
 ### Behoben

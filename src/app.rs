@@ -50,6 +50,8 @@ pub struct PlayerApp {
     last_activity: f64,
     fullscreen: bool,
     always_on_top: bool,
+    /// Versuche, die Windows-11-Rundung der Fensterecken abzuschalten (0 = erledigt/aufgegeben).
+    corner_tries: u8,
     /// Das Fenster wird gerade per Ziehen im Bild verschoben (nicht den Schieber bewegen).
     window_drag: bool,
     toast: Option<(String, bool, f64)>,
@@ -89,6 +91,7 @@ impl PlayerApp {
             last_activity: 0.0,
             fullscreen: false,
             always_on_top: false,
+            corner_tries: if cfg!(windows) { 30 } else { 0 },
             window_drag: false,
             toast: None,
             msg_tx,
@@ -596,7 +599,7 @@ impl PlayerApp {
 
     fn draw_video(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         let full = ui.max_rect();
-        ui.painter().rect_filled(full, 0.0, ui::BG);
+        ui.painter().rect_filled(full, 0.0, Color32::BLACK);
         let resp = ui.interact(full, egui::Id::new("video_area"), Sense::click_and_drag());
         if !resp.dragged() {
             self.window_drag = false;
@@ -791,14 +794,17 @@ impl PlayerApp {
     }
 
     /// Dünner Rand um das rahmenlose Fenster und unsichtbare Griffe zum Ändern der Größe.
-    fn draw_window_frame(&self, ui: &mut egui::Ui, ctx: &egui::Context) {
+    fn draw_window_frame(&self, ui: &mut egui::Ui, ctx: &egui::Context, show_border: bool) {
         let full = ui.max_rect();
-        ui.painter().rect_stroke(
-            full,
-            0.0,
-            Stroke::new(1.0, ui::alpha(ui::N700, 0.7)),
-            egui::StrokeKind::Inside,
-        );
+        // Bei ausgeblendeten Bedienelementen kein Rand: das Video soll vollständig sichtbar sein.
+        if show_border && !self.fullscreen {
+            ui.painter().rect_stroke(
+                full,
+                0.0,
+                Stroke::new(1.0, ui::alpha(ui::N700, 0.7)),
+                egui::StrokeKind::Inside,
+            );
+        }
         if cfg!(target_os = "macos") || self.fullscreen || Self::is_maximized(ctx) {
             return; // macOS: natives Fenster mit eigenem Rahmen und eigener Größenänderung
         }
@@ -1064,8 +1070,9 @@ impl PlayerApp {
             ("Strg + O  ·  Strg + N", "Datei öffnen  ·  Neues Fenster"),
             ("F1", "Diese Hilfe"),
         ];
+        const TITLE: &str = concat!("FrameScope ", env!("CARGO_PKG_VERSION"));
         let mut open = true;
-        egui::Window::new("Tastenkürzel")
+        egui::Window::new(format!("Tastenkürzel · {TITLE}"))
             .open(&mut open)
             .collapsible(false)
             .resizable(false)
@@ -1471,6 +1478,13 @@ fn frame_texts(p: &Player) -> (String, String) {
 impl eframe::App for PlayerApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        if self.corner_tries > 0 {
+            // Das Fenster ist erst nach den ersten Frames per Titel auffindbar.
+            self.corner_tries = match winutil::square_corners() {
+                Ok(()) => 0,
+                Err(_) => self.corner_tries - 1,
+            };
+        }
         self.handle_input(&ctx);
         if let Some(p) = self.player.as_mut() {
             p.poll();
@@ -1500,14 +1514,18 @@ impl eframe::App for PlayerApp {
             !playing || self.player.is_none() || time - self.last_activity < CONTROLS_TIMEOUT;
 
         egui::CentralPanel::default()
-            .frame(egui::Frame::new().fill(ui::BG))
+            .frame(egui::Frame::new().fill(if self.texture.is_some() {
+                Color32::BLACK
+            } else {
+                ui::BG
+            }))
             .show(ui, |ui| {
                 if self.texture.is_some() {
                     self.draw_video(ui, &ctx);
                 } else {
                     self.draw_placeholder(ui);
                 }
-                self.draw_window_frame(ui, &ctx);
+                self.draw_window_frame(ui, &ctx, controls_visible);
             });
         if controls_visible {
             self.draw_menu(&ctx);

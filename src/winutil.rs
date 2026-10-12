@@ -69,6 +69,17 @@ pub fn fit_own_window(_width: i32, _height: i32) -> Result<(i32, i32), String> {
     Err("Originalgröße wird nur unter Windows unterstützt".into())
 }
 
+/// Schaltet die von Windows 11 abgerundeten Fensterecken des eigenen Fensters ab.
+#[cfg(windows)]
+pub fn square_corners() -> Result<(), String> {
+    imp::square_corners()
+}
+
+#[cfg(not(windows))]
+pub fn square_corners() -> Result<(), String> {
+    Ok(())
+}
+
 /// Ordnet alle FrameScope-Fenster auf dem Monitor des eigenen Fensters an.
 /// Rückgabe: Anzahl der angeordneten Fenster.
 #[cfg(windows)]
@@ -245,6 +256,33 @@ mod imp {
             }
         }
         Ok(found.len())
+    }
+
+    pub fn square_corners() -> Result<(), String> {
+        use windows_sys::Win32::Graphics::Dwm::DwmSetWindowAttribute;
+        // DWMWA_WINDOW_CORNER_PREFERENCE = 33, DWMWCP_DONOTROUND = 1 (ältere Windows-Versionen
+        // kennen das Attribut nicht und liefern einen Fehler, der harmlos ist).
+        const CORNER_PREFERENCE: u32 = 33;
+        let (found, _) = find_all()?;
+        let own = found
+            .iter()
+            .find(|f| f.own)
+            .ok_or("Eigenes Fenster nicht gefunden")?;
+        let pref: i32 = 1;
+        // SAFETY: gültiges Fenster-Handle; `pref` lebt über den Aufruf.
+        let hr = unsafe {
+            DwmSetWindowAttribute(
+                own.hwnd,
+                CORNER_PREFERENCE,
+                &pref as *const i32 as *const _,
+                std::mem::size_of::<i32>() as u32,
+            )
+        };
+        if hr == 0 {
+            Ok(())
+        } else {
+            Err(format!("DWM-Fehler {hr:#x}"))
+        }
     }
 
     pub fn fit_own(width: i32, height: i32) -> Result<(i32, i32), String> {
