@@ -21,6 +21,8 @@ const AUDIO_ALIGN_TOLERANCE: f64 = 0.08;
 const CACHE_BUDGET: usize = 256 * 1024 * 1024;
 /// So weit (in Frames) darf der Decoder vorwärts „durchlaufen“, bevor ein Seek günstiger ist.
 const MAX_WAIT_FRAMES: usize = 120;
+/// Bis zu so viele Frames darf ein laufendes Ziel verlängert werden, ohne neu zu suchen.
+const EXTEND_FRAMES: usize = 12;
 
 pub struct Player {
     handle: DecoderHandle,
@@ -60,6 +62,8 @@ pub struct Player {
     base_time: Instant,
     /// Nach einem Seek/Schritt: der erste Frame mit `pts >= target` wird angezeigt.
     target: Option<f64>,
+    /// Startzeit des laufenden Hard-Seeks (der Decoder liefert ab hier lückenlos).
+    inflight_from: Option<f64>,
     pending: Option<Arc<Frame>>,
     /// PTS des zuletzt vom Decoder empfangenen Frames.
     stream_pts: f64,
@@ -70,6 +74,66 @@ pub struct Player {
     audio: Option<AudioEngine>,
     pub volume: f32,
     pub muted: bool,
+}
+
+/// Entwickler-Messung (`framescope --step-bench <datei> [Wiederholrate]`): hält die Taste
+/// „Frame vor“ gedrückt und meldet, wie lange der angezeigte Frame stillsteht.
+pub fn step_bench(path: PathBuf, rate: f64) {
+    let mut p = Player::new(path, || {}, 0.0, true, false);
+    let t0 = Instant::now();
+    while p.frame_count().is_none() || p.current.is_none() {
+        p.poll();
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        if t0.elapsed().as_secs() > 20 {
+            println!("Index/Frame nicht verfügbar");
+            return;
+        }
+    }
+    p.set_playing(false);
+    let (mut last_step, mut last_change) = (Instant::now(), Instant::now());
+    let mut worst = 0.0f64;
+    let mut stalls = 0;
+    let mut secs = 0;
+    let start = Instant::now();
+    let mut last_no = p.frame_no();
+    while start.elapsed().as_secs() < 20 {
+        if last_step.elapsed().as_secs_f64() >= 1.0 / rate {
+            last_step = Instant::now();
+            p.step(1);
+        }
+        p.poll();
+        if start.elapsed().as_secs() > secs {
+            secs = start.elapsed().as_secs();
+            println!(
+                "t={secs}s Frame {:?} Hard-Seeks {}",
+                p.frame_no(),
+                p.hard_seeks
+            );
+        }
+        if p.frame_no() != last_no {
+            let gap = last_change.elapsed().as_secs_f64();
+            if gap > 0.15 {
+                stalls += 1;
+                println!(
+                    "Stillstand {:.0} ms bei Frame {:?} (Hard-Seeks bisher {})",
+                    gap * 1000.0,
+                    last_no,
+                    p.hard_seeks
+                );
+            }
+            worst = worst.max(gap);
+            last_change = Instant::now();
+            last_no = p.frame_no();
+        }
+        std::thread::sleep(std::time::Duration::from_millis(16));
+    }
+    println!(
+        "Ende bei Frame {:?}, {} Stillstände >150 ms, schlimmster {:.0} ms, Hard-Seeks {}",
+        p.frame_no(),
+        stalls,
+        worst * 1000.0,
+        p.hard_seeks
+    );
 }
 
 impl Player {
@@ -112,6 +176,7 @@ impl Player {
             base_pos: 0.0,
             base_time: Instant::now(),
             target: Some(f64::NEG_INFINITY),
+            inflight_from: None,
             pending: None,
             stream_pts: f64::NEG_INFINITY,
             stream_shown: f64::NAN,
@@ -216,6 +281,7 @@ impl Player {
                     continue; // nur für den Cache (Prefetch vor dem Ziel)
                 }
                 self.target = None;
+                self.inflight_from = None;
                 if self.playing {
                     self.align_audio(frame.pts);
                 }
@@ -392,6 +458,7 @@ impl Player {
         self.hard_seeks += 1;
         crate::dlog::log(|| format!("hard_seek time={time:.3} from={from:.3}"));
         self.seek_started = Some(Instant::now());
+        self.inflight_from = Some(from - EPS);
         self.serial += 1;
         self.target = Some(time - EPS);
         self.pending = None;
@@ -439,12 +506,30 @@ impl Player {
             self.show_cached(f);
             return;
         }
+        // Ist schon ein Ziel unterwegs (Seek oder Weiterlaufen) und liegt das neue knapp dahinter
+        // oder gleich: nicht neu starten, sondern das Ziel verlängern. Sonst käme bei gehaltener
+        // Pfeiltaste (Wiederholrate schneller als ein Seek) nie ein Frame an.
+        if let Some(cur) = self.target.filter(|c| c.is_finite()) {
+            let cf = idx.frame_at(cur.max(0.0) + EPS);
+            let tf = idx.frame_at(t);
+            if tf >= cf
+                && tf - cf <= EXTEND_FRAMES
+                && self.inflight_from.is_none_or(|from| t >= from)
+            {
+                self.target = Some(t - EPS);
+                self.base_pos = t;
+                return;
+            }
+        }
+        self.inflight_from = None;
         // Weiterlaufen lohnt nur, wenn zwischen Decoder-Position und Ziel kein Keyframe liegt
         // (sonst ist ein Seek zum Keyframe schneller).
         if self.stream_pts.is_finite() && t > self.stream_pts && !self.eof {
             let (sf, tf) = (idx.frame_at(self.stream_pts.max(0.0)), idx.frame_at(t));
             let key_between = idx.next_key(sf).is_some_and(|k| k <= tf);
-            if !key_between && tf - sf <= MAX_WAIT_FRAMES {
+            // Wenige Frames weiter dekodieren ist immer billiger als ein Seek, auch über einen
+            // Keyframe hinweg (der Seek müsste die GOP davor neu dekodieren).
+            if (!key_between && tf - sf <= MAX_WAIT_FRAMES) || tf - sf <= EXTEND_FRAMES {
                 self.target = Some(t - EPS);
                 self.base_pos = t;
                 return;

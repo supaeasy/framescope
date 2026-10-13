@@ -8,6 +8,14 @@ Alle nennenswerten Änderungen an FrameScope. Das Format folgt
 ### Hinzugefügt
 - **macOS (experimentell, ungetestet):** App-Bundle für Apple Silicon und Intel, ad hoc signiert, mit selbst gebautem LGPL-FFmpeg (eigener Workflow `release-macos.yml`, Pre-Release über Tags `macos-v…`). Native Fenster-Ampel statt eigener Fenstersteuerung, Einstellungen neben dem `.app`; „Fenster anordnen“ nur unter Windows.
 
+## [0.4.3] - 2026-10-13
+
+### Behoben
+- **Stocken bei gehaltener Pfeiltaste.** Beim Weiterschalten über einen Keyframe startete jeder Tastendruck den Seek neu, sodass bei schneller Tastenwiederholung kein Bild mehr ankam, bis die Taste losgelassen wurde. Ein laufendes Ziel wird jetzt verlängert statt neu gesucht, und wenige Frames werden weiterdekodiert statt per Seek angesprungen (4K: vorher ~0,5 s Stillstand an jedem Keyframe, jetzt keiner).
+
+### Hinzugefügt
+- Entwickler-Flag `--step-bench <Datei> [Rate]`: simuliert gehaltene Taste „Frame vor“ und meldet Stillstände.
+
 ## [0.4.2] - 2026-10-12
 
 ### Geändert

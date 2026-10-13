@@ -38,6 +38,18 @@ fn main() -> anyhow::Result<()> {
             .ok_or_else(|| anyhow::anyhow!("Datei fehlt"))?;
         return decoder::bench(&path);
     }
+    if first.as_ref().is_some_and(|a| a == "--step-bench") {
+        let path = args
+            .next()
+            .map(PathBuf::from)
+            .ok_or_else(|| anyhow::anyhow!("Datei fehlt"))?;
+        let rate = args
+            .next()
+            .and_then(|r| r.to_string_lossy().parse().ok())
+            .unwrap_or(30.0);
+        player::step_bench(path, rate);
+        return Ok(());
+    }
     if first.is_some_and(|a| a == "--audio-selftest") {
         let path = args
             .next()
