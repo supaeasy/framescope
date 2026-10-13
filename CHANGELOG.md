@@ -8,6 +8,11 @@ Alle nennenswerten Änderungen an FrameScope. Das Format folgt
 ### Hinzugefügt
 - **macOS (experimentell, ungetestet):** App-Bundle für Apple Silicon und Intel, ad hoc signiert, mit selbst gebautem LGPL-FFmpeg (eigener Workflow `release-macos.yml`, Pre-Release über Tags `macos-v…`). Native Fenster-Ampel statt eigener Fenstersteuerung, Einstellungen neben dem `.app`; „Fenster anordnen“ nur unter Windows.
 
+## [0.5.0] - 2026-10-13
+
+### Hinzugefügt
+- **Datei auf eine Fensterhälfte ziehen.** Läuft schon ein Video, wird eine hineingezogene Datei links zu Video A und rechts zu Video B; beim Ziehen markiert das Fenster das Ziel. Ohne laufenden Vergleich wird beim Ablegen links das bisherige Video zu B. Die Zeigerposition wird unter Windows direkt abgefragt, weil der Explorer beim Ziehen keine Mausereignisse an das Fenster sendet.
+
 ## [0.4.3] - 2026-10-13
 
 ### Behoben

@@ -157,6 +157,72 @@ impl PlayerApp {
         self.compare = Some(new);
     }
 
+    /// Liegt der Mauszeiger (beim Ziehen/Ablegen einer Datei) in der rechten Fensterhälfte?
+    fn drag_on_right(&self, ctx: &egui::Context) -> Option<bool> {
+        winutil::cursor_fraction().map(|f| f > 0.5).or_else(|| {
+            ctx.input(|i| {
+                i.pointer
+                    .hover_pos()
+                    .map(|p| p.x > i.content_rect().center().x)
+            })
+        })
+    }
+
+    /// Ablegen auf der linken Hälfte: die Datei wird Video A. Läuft noch kein Vergleich, wird das
+    /// bisherige Video zu B.
+    fn drop_as_a(&mut self, ctx: &egui::Context, path: PathBuf) {
+        let old = self.player.as_ref().map(|p| p.path.clone());
+        self.open(ctx, path);
+        match (self.compare.is_some(), old) {
+            (false, Some(old)) => self.open_b(ctx, old),
+            (true, _) => {
+                if let (Some(a), Some(c)) = (self.player.as_ref(), self.compare.as_ref()) {
+                    let title = format!(
+                        "{} vs {} – FrameScope",
+                        file_label(&a.path),
+                        file_label(&c.player.path)
+                    );
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Während eine Datei über das Fenster gezogen wird: linke/rechte Hälfte als Ziel anzeigen.
+    fn draw_drop_hint(&self, ctx: &egui::Context) {
+        if self.player.is_none() || ctx.input(|i| i.raw.hovered_files.is_empty()) {
+            return;
+        }
+        ctx.request_repaint();
+        let rect = ctx.content_rect();
+        let right = self.drag_on_right(ctx).unwrap_or(false) || ctx.input(|i| i.modifiers.shift);
+        let painter = ctx.layer_painter(egui::LayerId::new(
+            egui::Order::Foreground,
+            egui::Id::new("drop_hint"),
+        ));
+        let (l, r) = rect.split_left_right_at_fraction(0.5);
+        for (half, active, label) in [(l, !right, "Video A"), (r, right, "Video B")] {
+            let fill = if active {
+                ui::alpha(ui::ACCENT, 0.30)
+            } else {
+                ui::alpha(ui::BG, 0.70)
+            };
+            painter.rect_filled(half, 0.0, fill);
+            painter.text(
+                half.center(),
+                Align2::CENTER_CENTER,
+                label,
+                egui::FontId::proportional(22.0),
+                if active { Color32::WHITE } else { ui::N300 },
+            );
+        }
+        painter.line_segment(
+            [rect.center_top(), rect.center_bottom()],
+            Stroke::new(1.0, ui::alpha(ui::N700, 0.8)),
+        );
+    }
+
     fn close_compare(&mut self, ctx: &egui::Context) {
         if self.compare.take().is_some() {
             self.toast(ctx, "Vergleich beendet", false);
@@ -461,7 +527,6 @@ impl PlayerApp {
             while i.consume_key(mods, key) {}
             n
         }
-        let compare_active = self.compare.is_some();
         let k = ctx.input_mut(|i| Keys {
             dropped: i
                 .raw
@@ -491,11 +556,7 @@ impl PlayerApp {
             help: i.consume_key(Modifiers::NONE, Key::F1),
             compare_toggle: i.consume_key(Modifiers::COMMAND, Key::B),
             compare_mode: i.consume_key(Modifiers::NONE, Key::C),
-            drop_to_b: i.modifiers.shift
-                || (compare_active
-                    && i.pointer
-                        .hover_pos()
-                        .is_some_and(|p| p.x > i.content_rect().center().x)),
+            drop_to_b: i.modifiers.shift,
             sync_align: i.consume_key(Modifiers::SHIFT, Key::Y),
             top: i.consume_key(Modifiers::NONE, Key::T),
             original: i.consume_key(Modifiers::NONE, Key::Num1),
@@ -503,10 +564,12 @@ impl PlayerApp {
             sync: i.consume_key(Modifiers::NONE, Key::Y),
         });
         if let Some(path) = k.dropped {
-            if k.drop_to_b && self.player.is_some() {
+            if self.player.is_none() {
+                self.open(ctx, path);
+            } else if k.drop_to_b || self.drag_on_right(ctx) == Some(true) {
                 self.open_b(ctx, path);
             } else {
-                self.open(ctx, path);
+                self.drop_as_a(ctx, path);
             }
         }
         if k.compare_toggle {
@@ -1068,6 +1131,10 @@ impl PlayerApp {
                 "Sync mit anderen Fenstern  ·  Versatz abgleichen",
             ),
             ("Strg + O  ·  Strg + N", "Datei öffnen  ·  Neues Fenster"),
+            (
+                "Datei ziehen",
+                "Links: Video A  ·  rechts: Video B (Vergleich)",
+            ),
             ("F1", "Diese Hilfe"),
         ];
         const TITLE: &str = concat!("FrameScope ", env!("CARGO_PKG_VERSION"));
@@ -1537,6 +1604,7 @@ impl eframe::App for PlayerApp {
             self.draw_hud(&ctx);
         }
         self.draw_help(&ctx);
+        self.draw_drop_hint(&ctx);
         self.draw_toast(&ctx);
         self.bench_tick(&ctx, time);
 

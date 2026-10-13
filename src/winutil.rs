@@ -69,6 +69,19 @@ pub fn fit_own_window(_width: i32, _height: i32) -> Result<(i32, i32), String> {
     Err("Originalgröße wird nur unter Windows unterstützt".into())
 }
 
+/// Horizontale Position des Mauszeigers im eigenen Fenster (0 = links, 1 = rechts).
+/// Beim Ziehen von Dateien aus dem Explorer liefert Windows keine Mausereignisse an das
+/// Fenster, deshalb wird die Zeigerposition direkt abgefragt.
+#[cfg(windows)]
+pub fn cursor_fraction() -> Option<f32> {
+    imp::cursor_fraction()
+}
+
+#[cfg(not(windows))]
+pub fn cursor_fraction() -> Option<f32> {
+    None
+}
+
 /// Schaltet die von Windows 11 abgerundeten Fensterecken des eigenen Fensters ab.
 #[cfg(windows)]
 pub fn square_corners() -> Result<(), String> {
@@ -256,6 +269,24 @@ mod imp {
             }
         }
         Ok(found.len())
+    }
+
+    pub fn cursor_fraction() -> Option<f32> {
+        use windows_sys::Win32::Foundation::POINT;
+        use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
+        let (found, _) = find_all().ok()?;
+        let own = found.iter().find(|f| f.own)?;
+        let mut pt = POINT { x: 0, y: 0 };
+        let mut rect = RECT {
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+        };
+        // SAFETY: gültiges Fenster-Handle, Ausgabestrukturen sind initialisiert.
+        let ok = unsafe { GetCursorPos(&mut pt) != 0 && GetWindowRect(own.hwnd, &mut rect) != 0 };
+        let width = (rect.right - rect.left) as f32;
+        (ok && width > 0.0).then(|| ((pt.x - rect.left) as f32 / width).clamp(0.0, 1.0))
     }
 
     pub fn square_corners() -> Result<(), String> {

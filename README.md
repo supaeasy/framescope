@@ -94,8 +94,9 @@ anderen Ordnern.
 
 ### A/B-Vergleich (zwei Videos in einem Fenster)
 
-Video B öffnest du über **Vergleichen…** (oben rechts), `Strg+B`, per Drag & Drop mit gedrückter `Umschalt`-Taste
-(bzw. in die rechte Fensterhälfte, wenn der Vergleich schon läuft) oder direkt beim Start:
+Video B öffnest du über **Vergleichen…** (oben rechts), `Strg+B`, per Drag & Drop (Datei auf die **rechte Fensterhälfte** ziehen, alternativ mit gedrückter `Umschalt`-Taste)
+oder direkt beim Start. Zieht man eine Datei auf die **linke Hälfte**, wird sie Video A (das bisherige Video wird dann B);
+während des Ziehens zeigt das Fenster die beiden Ziele an:
 
 ```powershell
 framescope.exe "A.mp4" "B.mp4"
