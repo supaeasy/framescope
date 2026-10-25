@@ -101,14 +101,21 @@ pub fn apply_theme(ctx: &egui::Context) {
 
 /// Vertikaler Verlauf: oben transparent, unten `color` mit Deckkraft `bottom_alpha`.
 pub fn fade_up(painter: &egui::Painter, rect: Rect, color: Color32, bottom_alpha: f32) {
+    // Drei Stufen: oben klar, nach 40 % schon deutlich gedeckt, unten fast deckend – so bleiben
+    // Zähler und Zeitangaben auch auf weißem Bild lesbar.
     let (clear, solid) = (Color32::TRANSPARENT, alpha(color, bottom_alpha));
+    let mid = alpha(color, bottom_alpha * 0.8);
+    let y_mid = rect.top() + rect.height() * 0.4;
     let mut mesh = Mesh::default();
-    mesh.colored_vertex(rect.left_top(), clear);
-    mesh.colored_vertex(rect.right_top(), clear);
-    mesh.colored_vertex(rect.right_bottom(), solid);
-    mesh.colored_vertex(rect.left_bottom(), solid);
-    mesh.add_triangle(0, 1, 2);
-    mesh.add_triangle(0, 2, 3);
+    for (y, c) in [(rect.top(), clear), (y_mid, mid), (rect.bottom(), solid)] {
+        mesh.colored_vertex(Pos2::new(rect.left(), y), c);
+        mesh.colored_vertex(Pos2::new(rect.right(), y), c);
+    }
+    for row in 0..2u32 {
+        let i = row * 2;
+        mesh.add_triangle(i, i + 1, i + 3);
+        mesh.add_triangle(i, i + 3, i + 2);
+    }
     painter.add(egui::Shape::mesh(mesh));
 }
 

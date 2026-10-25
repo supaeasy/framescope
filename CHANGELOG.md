@@ -5,8 +5,14 @@ Alle nennenswerten Änderungen an FrameScope. Das Format folgt
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-25
+
 ### Hinzugefügt
+- **Safe-Area-Ebenen (Title-Safe).** Über den Button oben rechts lassen sich beliebig viele Ebenen über das Bild legen: TV Action-Safe 93 % und Title-Safe 90 % (EBU R 95, wie bei SRG/ARD/ZDF) sowie die YouTube-Vorgaben für horizontale (16:9), quadratische (1:1) und vertikale (9:16) Video-Ads. Die Linien haben eine dunkle Unterlage und sind auf hellem wie dunklem Bild sichtbar; `Z` blendet die Auswahl ein und aus, sie wird in `framescope.ini` gespeichert.
 - **macOS (experimentell, ungetestet):** App-Bundle für Apple Silicon und Intel, ad hoc signiert, mit selbst gebautem LGPL-FFmpeg (eigener Workflow `release-macos.yml`, Pre-Release über Tags `macos-v…`). Native Fenster-Ampel statt eigener Fenstersteuerung, Einstellungen neben dem `.app`; „Fenster anordnen“ nur unter Windows.
+
+### Geändert
+- Der Verlauf unter den Bedienelementen ist höher und deckender, damit Frame-Zähler und Timecode auch auf weißem Bild lesbar bleiben.
 
 ## [0.5.0] - 2026-10-13
 

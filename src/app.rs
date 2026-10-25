@@ -6,7 +6,7 @@ use crate::player::Player;
 use crate::settings::Settings;
 use crate::sync::SyncController;
 use crate::timeline::LoopBand;
-use crate::{export, timecode, timeline, ui, winutil};
+use crate::{export, safezone, timecode, timeline, ui, winutil};
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use eframe::egui::{
     self, Align2, Color32, CursorIcon, Key, Modifiers, Rect, RichText, Sense, Stroke,
@@ -43,6 +43,9 @@ pub struct PlayerApp {
     volume: f32,
     muted: bool,
     hud: bool,
+    /// Eingeblendete Safe-Area-Ebenen (Bitmaske) und die zuletzt gewählten (für Taste Z).
+    safe: u8,
+    safe_last: u8,
     help: bool,
     sync: SyncController,
     error: Option<String>,
@@ -79,6 +82,8 @@ impl PlayerApp {
             volume: settings.volume,
             muted: settings.muted,
             hud: settings.hud,
+            safe: settings.safe_zones,
+            safe_last: settings.safe_zones,
             help: false,
             sync: SyncController::new({
                 let ctx = cc.egui_ctx.clone();
@@ -504,6 +509,7 @@ impl PlayerApp {
             fullscreen: bool,
             escape: bool,
             hud: bool,
+            safe: bool,
             help: bool,
             sync: bool,
             sync_align: bool,
@@ -553,6 +559,7 @@ impl PlayerApp {
             fullscreen: i.consume_key(Modifiers::NONE, Key::F),
             escape: i.consume_key(Modifiers::NONE, Key::Escape),
             hud: i.consume_key(Modifiers::NONE, Key::H),
+            safe: i.consume_key(Modifiers::NONE, Key::Z),
             help: i.consume_key(Modifiers::NONE, Key::F1),
             compare_toggle: i.consume_key(Modifiers::COMMAND, Key::B),
             compare_mode: i.consume_key(Modifiers::NONE, Key::C),
@@ -608,6 +615,18 @@ impl PlayerApp {
         }
         if k.hud {
             self.hud = !self.hud;
+        }
+        if k.safe {
+            if self.safe != 0 {
+                self.safe_last = self.safe;
+                self.safe = 0;
+            } else {
+                self.safe = if self.safe_last != 0 {
+                    self.safe_last
+                } else {
+                    safezone::Zone::TvTitle.bit()
+                };
+            }
         }
         if k.help {
             self.help = !self.help;
@@ -708,8 +727,10 @@ impl PlayerApp {
         let Some(c) = self.compare.as_mut() else {
             let rect = compare::fit(full, tex_a.size_vec2());
             painter.image(tex_a.id(), rect, compare::FULL_UV, Color32::WHITE);
+            safezone::draw(&painter, rect, self.safe);
             return;
         };
+        let safe = self.safe;
         let tex_b = c.texture.clone();
         let name_b = file_label(&c.player.path);
         let pointer_x = resp.interact_pointer_pos().map(|p| p.x);
@@ -768,6 +789,7 @@ impl PlayerApp {
                     Align2::RIGHT_TOP,
                     &format!("B  {name_b}"),
                 );
+                safezone::draw(&painter, rect, safe);
             }
             compare::Mode::SideBySide => {
                 let mid = full.center().x;
@@ -775,6 +797,7 @@ impl PlayerApp {
                 let right = Rect::from_min_max(egui::pos2(mid + 1.0, full.min.y), full.max);
                 let rect_a = compare::fit(left, tex_a.size_vec2());
                 painter.image(tex_a.id(), rect_a, compare::FULL_UV, Color32::WHITE);
+                safezone::draw(&painter, rect_a, safe);
                 chip(
                     &painter,
                     rect_a.left_top() + Vec2::new(10.0, 58.0),
@@ -784,6 +807,7 @@ impl PlayerApp {
                 if let Some(tb) = &tex_b {
                     let rect_b = compare::fit(right, tb.size_vec2());
                     painter.image(tb.id(), rect_b, compare::FULL_UV, Color32::WHITE);
+                    safezone::draw(&painter, rect_b, safe);
                     chip(
                         &painter,
                         rect_b.left_top() + Vec2::new(10.0, 58.0),
@@ -807,6 +831,7 @@ impl PlayerApp {
                 if let Some(tb) = &tex_b {
                     painter.image(tb.id(), rect, compare::FULL_UV, compare::fade(c.split));
                 }
+                safezone::draw(&painter, rect, safe);
                 chip(
                     &painter,
                     rect.left_top() + Vec2::new(10.0, 58.0),
@@ -980,6 +1005,29 @@ impl PlayerApp {
                         )
                         .clicked();
                     }
+                    if has_a {
+                        let resp = ui::ghost_button(
+                            ui,
+                            Some(ui::Glyph::Regular(ph::CORNERS_OUT)),
+                            "",
+                            self.safe != 0,
+                            "Safe-Area-Ebenen einblenden (Z: an/aus)",
+                        );
+                        egui::Popup::menu(&resp)
+                            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                            .show(|ui| {
+                                ui.set_min_width(250.0);
+                                for zone in safezone::ZONES {
+                                    let mut on = self.safe & zone.bit() != 0;
+                                    if ui.checkbox(&mut on, zone.label()).changed() {
+                                        self.safe ^= zone.bit();
+                                        if self.safe != 0 {
+                                            self.safe_last = self.safe;
+                                        }
+                                    }
+                                }
+                            });
+                    }
                     pin = ui::ghost_button(ui, Some(ui::Glyph::Regular(ph::PUSH_PIN)), "", self.always_on_top, "Immer im Vordergrund (T)").clicked();
                     help = ui::ghost_button(ui, Some(ui::Glyph::Regular(ph::QUESTION)), "", self.help, "Tastenkürzel (F1)").clicked();
                     if let Some(mode) = compare_label {
@@ -1118,6 +1166,7 @@ impl PlayerApp {
             ("S  ·  Umschalt + S", "Frame als PNG  ·  Ordner wählen"),
             ("F  ·  Esc", "Vollbild  ·  beenden"),
             ("H", "Info-Overlay (Frame, Timecode, KEY)"),
+            ("Z", "Safe-Area-Ebenen an/aus (Auswahl: Button oben)"),
             ("Klick ins Bild", "Wiedergabe / Pause"),
             (
                 "Ziehen im Bild",
@@ -1265,7 +1314,7 @@ impl PlayerApp {
         const GAP: f32 = 8.0;
         let screen = ctx.content_rect();
         let bar = Rect::from_min_max(
-            egui::pos2(screen.left(), screen.bottom() - CONTROLS_HEIGHT),
+            egui::pos2(screen.left(), screen.bottom() - CONTROLS_HEIGHT - 40.0),
             screen.right_bottom(),
         );
         // Verlauf liegt unter den Widgets und fängt keine Mauseingaben ab.
@@ -1273,7 +1322,7 @@ impl PlayerApp {
             egui::Order::Middle,
             egui::Id::new("controls_fade"),
         ));
-        ui::fade_up(&fade, bar, ui::BG, 0.94);
+        ui::fade_up(&fade, bar, ui::BG, 0.98);
 
         let inner_w = screen.width() - 2.0 * PAD_X;
         let top_left = egui::pos2(
@@ -1629,6 +1678,7 @@ impl eframe::App for PlayerApp {
         s.volume = self.volume;
         s.muted = self.muted;
         s.hud = self.hud;
+        s.safe_zones = self.safe;
         if self.export_dir_changed {
             s.export_dir = self.settings.export_dir.clone();
         }

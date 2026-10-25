@@ -8,6 +8,7 @@ mod dlog;
 mod export;
 mod index;
 mod player;
+mod safezone;
 mod settings;
 mod sync;
 mod timecode;

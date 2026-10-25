@@ -13,6 +13,8 @@ pub struct Settings {
     pub hud: bool,
     /// Standardordner für den PNG-Export (`None` = beim ersten Export fragen).
     pub export_dir: Option<PathBuf>,
+    /// Eingeblendete Safe-Area-Ebenen (Bitmaske, siehe `safezone::Zone::bit`).
+    pub safe_zones: u8,
 }
 
 impl Default for Settings {
@@ -22,6 +24,7 @@ impl Default for Settings {
             muted: false,
             hud: false,
             export_dir: None,
+            safe_zones: 0,
         }
     }
 }
@@ -67,6 +70,7 @@ impl Settings {
                 }
                 "muted" => s.muted = value == "true",
                 "hud" => s.hud = value == "true",
+                "safe_zones" => s.safe_zones = value.parse().unwrap_or(0),
                 "export_dir" if !value.is_empty() => s.export_dir = Some(PathBuf::from(value)),
                 _ => {}
             }
@@ -77,8 +81,8 @@ impl Settings {
     pub fn serialize(&self) -> String {
         let mut out = String::from("# FrameScope – Einstellungen (portabel, neben der EXE)\n");
         out.push_str(&format!(
-            "volume={:.2}\nmuted={}\nhud={}\n",
-            self.volume, self.muted, self.hud
+            "volume={:.2}\nmuted={}\nhud={}\nsafe_zones={}\n",
+            self.volume, self.muted, self.hud, self.safe_zones
         ));
         if let Some(d) = &self.export_dir {
             out.push_str(&format!("export_dir={}\n", d.display()));
@@ -105,6 +109,7 @@ mod tests {
             muted: true,
             hud: true,
             export_dir: Some(PathBuf::from("C:\\Frames")),
+            safe_zones: 5,
         };
         assert_eq!(Settings::parse(&s.serialize()), s);
     }
