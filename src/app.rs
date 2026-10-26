@@ -46,6 +46,8 @@ pub struct PlayerApp {
     /// Eingeblendete Safe-Area-Ebenen (Bitmaske) und die zuletzt gewählten (für Taste Z).
     safe: u8,
     safe_last: u8,
+    /// Codec-/Stream-Informationen einblenden.
+    codec_info: bool,
     help: bool,
     sync: SyncController,
     error: Option<String>,
@@ -83,6 +85,7 @@ impl PlayerApp {
             muted: settings.muted,
             hud: settings.hud,
             safe: settings.safe_zones,
+            codec_info: false,
             safe_last: settings.safe_zones,
             help: false,
             sync: SyncController::new({
@@ -226,6 +229,87 @@ impl PlayerApp {
             [rect.center_top(), rect.center_bottom()],
             Stroke::new(1.0, ui::alpha(ui::N700, 0.8)),
         );
+    }
+
+    /// Codec-Informationen als Tafel oben links (bei Vergleich: A und B nebeneinander).
+    fn draw_codec_panel(&self, ctx: &egui::Context) {
+        if !self.codec_info {
+            return;
+        }
+        let Some(a) = self.player.as_ref() else {
+            return;
+        };
+        let mut entries = vec![("A", a)];
+        if let Some(c) = self.compare.as_ref() {
+            entries.push(("B", &c.player));
+        }
+        let left = if cfg!(target_os = "macos") {
+            84.0
+        } else {
+            14.0
+        };
+        egui::Area::new(egui::Id::new("codec_panel"))
+            .anchor(Align2::LEFT_TOP, [left, 62.0])
+            .order(egui::Order::Foreground)
+            .interactable(false)
+            .show(ctx, |ui| {
+                egui::Frame::new()
+                    .fill(ui::alpha(ui::BG, 0.92))
+                    .corner_radius(8.0)
+                    .stroke(Stroke::new(1.0, ui::N800))
+                    .inner_margin(egui::Margin::same(12))
+                    .show(ui, |ui| {
+                        ui.horizontal_top(|ui| {
+                            for (i, (tag, p)) in entries.iter().enumerate() {
+                                if i > 0 {
+                                    ui.add_space(18.0);
+                                }
+                                ui.vertical(|ui| {
+                                    let title = if entries.len() > 1 {
+                                        format!("{tag}  {}", file_label(&p.path))
+                                    } else {
+                                        file_label(&p.path)
+                                    };
+                                    ui.label(RichText::new(title).size(13.0).color(ui::A300));
+                                    ui.add_space(4.0);
+                                    let Some(info) = &p.info else {
+                                        ui.label(
+                                            RichText::new("Wird geladen …")
+                                                .size(12.0)
+                                                .color(ui::N400),
+                                        );
+                                        return;
+                                    };
+                                    egui::Grid::new(format!("codec_grid_{tag}"))
+                                        .num_columns(2)
+                                        .spacing([14.0, 4.0])
+                                        .show(ui, |ui| {
+                                            for (key, value) in &info.details {
+                                                ui.label(
+                                                    RichText::new(*key).size(12.0).color(ui::N400),
+                                                );
+                                                let value = if *key == "Bildfolge" {
+                                                    let (rate, _) = scan_label(p);
+                                                    let kind = if is_interlaced(p) {
+                                                        "interlaced, Halbbilder"
+                                                    } else {
+                                                        "progressiv, Vollbilder"
+                                                    };
+                                                    format!("{rate} ({kind})")
+                                                } else {
+                                                    value.clone()
+                                                };
+                                                ui.label(
+                                                    RichText::new(value).size(12.0).color(ui::N200),
+                                                );
+                                                ui.end_row();
+                                            }
+                                        });
+                                });
+                            }
+                        });
+                    });
+            });
     }
 
     fn close_compare(&mut self, ctx: &egui::Context) {
@@ -510,6 +594,7 @@ impl PlayerApp {
             escape: bool,
             hud: bool,
             safe: bool,
+            codec: bool,
             help: bool,
             sync: bool,
             sync_align: bool,
@@ -560,6 +645,7 @@ impl PlayerApp {
             escape: i.consume_key(Modifiers::NONE, Key::Escape),
             hud: i.consume_key(Modifiers::NONE, Key::H),
             safe: i.consume_key(Modifiers::NONE, Key::Z),
+            codec: i.consume_key(Modifiers::NONE, Key::D),
             help: i.consume_key(Modifiers::NONE, Key::F1),
             compare_toggle: i.consume_key(Modifiers::COMMAND, Key::B),
             compare_mode: i.consume_key(Modifiers::NONE, Key::C),
@@ -615,6 +701,9 @@ impl PlayerApp {
         }
         if k.hud {
             self.hud = !self.hud;
+        }
+        if k.codec {
+            self.codec_info = !self.codec_info;
         }
         if k.safe {
             if self.safe != 0 {
@@ -679,7 +768,7 @@ impl PlayerApp {
         }
     }
 
-    fn draw_video(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+    fn draw_video(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, show_chips: bool) {
         let full = ui.max_rect();
         ui.painter().rect_filled(full, 0.0, Color32::BLACK);
         let resp = ui.interact(full, egui::Id::new("video_area"), Sense::click_and_drag());
@@ -719,6 +808,12 @@ impl PlayerApp {
             return;
         };
         let painter = ui.painter().clone();
+        // Dateinamen-Marken erscheinen nur zusammen mit den Bedienelementen.
+        let chip = |p: &egui::Painter, pos: egui::Pos2, anchor: Align2, text: &str| {
+            if show_chips {
+                chip(p, pos, anchor, text);
+            }
+        };
         let name_a = self
             .player
             .as_ref()
@@ -966,6 +1061,7 @@ impl PlayerApp {
         let (mut open, mut new_win, mut help, mut sync) = (false, false, false, false);
         let (mut cmp_toggle, mut cmp_mode) = (false, false);
         let (mut pin, mut arrange, mut original) = (false, false, false);
+        let mut codec_btn = false;
         let (mut minimize, mut maximize, mut close) = (false, false, false);
         let compare_label = self.compare.as_ref().map(|c| c.mode.label());
         let has_a = self.player.is_some();
@@ -1028,6 +1124,16 @@ impl PlayerApp {
                                 }
                             });
                     }
+                    if has_a {
+                        codec_btn = ui::ghost_button(
+                            ui,
+                            Some(ui::Glyph::Regular(ph::INFO)),
+                            "",
+                            self.codec_info,
+                            "Codec-Informationen anzeigen (D)",
+                        )
+                        .clicked();
+                    }
                     pin = ui::ghost_button(ui, Some(ui::Glyph::Regular(ph::PUSH_PIN)), "", self.always_on_top, "Immer im Vordergrund (T)").clicked();
                     help = ui::ghost_button(ui, Some(ui::Glyph::Regular(ph::QUESTION)), "", self.help, "Tastenkürzel (F1)").clicked();
                     if let Some(mode) = compare_label {
@@ -1079,6 +1185,9 @@ impl PlayerApp {
         }
         if original {
             self.fit_window_to_video(ctx);
+        }
+        if codec_btn {
+            self.codec_info = !self.codec_info;
         }
         if pin {
             self.set_always_on_top(ctx, !self.always_on_top);
@@ -1167,6 +1276,7 @@ impl PlayerApp {
             ("F  ·  Esc", "Vollbild  ·  beenden"),
             ("H", "Info-Overlay (Frame, Timecode, KEY)"),
             ("Z", "Safe-Area-Ebenen an/aus (Auswahl: Button oben)"),
+            ("D", "Codec-Informationen (Details zu Video und Ton)"),
             ("Klick ins Bild", "Wiedergabe / Pause"),
             (
                 "Ziehen im Bild",
@@ -1450,6 +1560,12 @@ impl PlayerApp {
                             counter.on_hover_text(tip);
                         }
                         ui.add_space(4.0);
+                        if p.info.is_some() {
+                            let (text, tip) = scan_label(p);
+                            ui.label(RichText::new(text).size(12.0).color(ui::N400))
+                                .on_hover_text(tip);
+                            ui.add_space(2.0);
+                        }
                         if cur.is_some_and(|(pts, key)| is_key(p, pts, key)) {
                             ui::tag(ui, "KEY");
                         }
@@ -1550,6 +1666,35 @@ impl PlayerApp {
     }
 }
 
+/// Ist das Material Halbbild-Material (interlaced)? Container-Angabe oder Markierung am Frame.
+fn is_interlaced(p: &Player) -> bool {
+    p.info
+        .as_ref()
+        .is_some_and(|i| (2..=5).contains(&i.field_order))
+        || p.current.as_ref().is_some_and(|f| f.interlaced)
+}
+
+/// „25 fps · p“ (Bildrate mit Hinweis p = progressiv, i = interlaced) samt Erklärung.
+fn scan_label(p: &Player) -> (String, &'static str) {
+    let fps = p.fps();
+    let rate = if (fps - fps.round()).abs() < 0.005 {
+        format!("{fps:.0}")
+    } else {
+        format!("{fps:.3}")
+    };
+    if is_interlaced(p) {
+        (
+            format!("{rate} fps · i"),
+            "interlaced (Halbbilder) – die Bildrate zählt Vollbilder, nicht Halbbilder",
+        )
+    } else {
+        (
+            format!("{rate} fps · p"),
+            "progressiv (Vollbilder) – bei Halbbild-Material ohne Markierung kann es i sein",
+        )
+    }
+}
+
 /// Keyframe-Status des angezeigten Frames: bevorzugt aus dem Index, sonst Decoder-Flag.
 fn is_key(p: &Player, pts: f64, decoder_flag: bool) -> bool {
     match &p.index {
@@ -1637,7 +1782,7 @@ impl eframe::App for PlayerApp {
             }))
             .show(ui, |ui| {
                 if self.texture.is_some() {
-                    self.draw_video(ui, &ctx);
+                    self.draw_video(ui, &ctx, controls_visible);
                 } else {
                     self.draw_placeholder(ui);
                 }
@@ -1653,6 +1798,7 @@ impl eframe::App for PlayerApp {
             self.draw_hud(&ctx);
         }
         self.draw_help(&ctx);
+        self.draw_codec_panel(&ctx);
         self.draw_drop_hint(&ctx);
         self.draw_toast(&ctx);
         self.bench_tick(&ctx, time);

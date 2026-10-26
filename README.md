@@ -52,6 +52,7 @@ geschrieben in Rust. Kein Installer, keine Registry-Einträge, keine Daten in `%
 | `Y` | Wiedergabe mit anderen FrameScope-Fenstern **synchronisieren** (an/aus) |
 | `Umschalt` + `Y` | Sync-Versatz abgleichen (siehe unten) |
 | `H` | Dauerhaftes Info-Overlay (Frame, Timecode, KEY) oben links |
+| `D` | Codec-Informationen einblenden (Container, Codec, Profil, Pixelformat, Farbe, Datenrate, Audio) |
 | `Z` | Gewählte Safe-Area-Ebenen ein-/ausblenden (Auswahl über den Button oben rechts) |
 | `Strg` + `O` | Datei öffnen |
 | `Strg` + `N` | Neues Fenster (weitere Instanz) |

@@ -115,7 +115,11 @@ fn inset(m: f32) -> Vec<(f32, f32)> {
 
 /// Zeichnet alle in `mask` gewählten Ebenen auf das Bild `rect`.
 pub fn draw(painter: &Painter, rect: Rect, mask: u8) {
-    for zone in ZONES.into_iter().filter(|z| mask & z.bit() != 0) {
+    for (slot, zone) in ZONES
+        .into_iter()
+        .filter(|z| mask & z.bit() != 0)
+        .enumerate()
+    {
         let pts: Vec<Pos2> = zone
             .outline()
             .into_iter()
@@ -149,7 +153,7 @@ pub fn draw(painter: &Painter, rect: Rect, mask: u8) {
             zone.color(),
         );
         let tag = Rect::from_min_size(
-            anchor + egui::vec2(4.0, 4.0),
+            anchor + egui::vec2(4.0, 4.0 + slot as f32 * 20.0),
             galley.size() + egui::vec2(10.0, 4.0),
         );
         painter.rect_filled(tag, 4.0, ui::alpha(Color32::BLACK, 0.7));

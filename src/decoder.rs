@@ -30,6 +30,10 @@ pub struct VideoInfo {
     /// Dauer in Sekunden (0, falls unbekannt).
     pub duration: f64,
     pub codec: String,
+    /// Halbbild-Reihenfolge laut Container (0 = unbekannt, 1 = progressiv, 2–5 = interlaced).
+    pub field_order: i32,
+    /// Technische Angaben zur Anzeige („Container“, „Profil“, …) in Anzeigereihenfolge.
+    pub details: Vec<(&'static str, String)>,
 }
 
 /// Ein dekodierter Frame in Originalauflösung (RGBA, dicht gepackt).
@@ -39,6 +43,8 @@ pub struct Frame {
     /// Präsentationszeit in Sekunden (relativ zum Streamstart).
     pub pts: f64,
     pub key: bool,
+    /// Der Frame ist als Halbbild-Material (interlaced) markiert.
+    pub interlaced: bool,
     pub width: usize,
     pub height: usize,
     pub rgba: Vec<u8>,
@@ -119,6 +125,124 @@ fn ratio(r: ffmpeg::Rational) -> f64 {
     f64::from(r.numerator()) / f64::from(r.denominator().max(1))
 }
 
+/// Technische Angaben für die Codec-Anzeige.
+fn describe(
+    input: &format::context::Input,
+    stream: &ffmpeg::format::stream::Stream,
+    decoder: &ffmpeg::decoder::Video,
+    codec: &str,
+) -> (i32, Vec<(&'static str, String)>) {
+    use std::ffi::CStr;
+    // SAFETY: die Parameter gehören zum geöffneten Stream und leben mindestens so lange.
+    let par = unsafe { &*stream.parameters().as_ptr() };
+    let mut rows: Vec<(&'static str, String)> = Vec::new();
+
+    let container = input
+        .format()
+        .name()
+        .split(',')
+        .next()
+        .unwrap_or("")
+        .to_string();
+    rows.push(("Container", container));
+
+    let long_name = decoder
+        .codec()
+        .map(|c| c.description().to_string())
+        .unwrap_or_default();
+    rows.push((
+        "Codec",
+        if long_name.is_empty() {
+            codec.to_string()
+        } else {
+            format!("{codec} · {long_name}")
+        },
+    ));
+    // SAFETY: liefert einen statischen C-String oder NULL.
+    let profile = unsafe {
+        let p = ffmpeg::ffi::avcodec_profile_name(par.codec_id, par.profile);
+        (!p.is_null()).then(|| CStr::from_ptr(p).to_string_lossy().into_owned())
+    };
+    if let Some(profile) = profile {
+        let level = match (codec, par.level) {
+            (_, l) if l <= 0 => String::new(),
+            ("h264", l) => format!(" · Level {:.1}", f64::from(l) / 10.0),
+            ("hevc", l) => format!(" · Level {:.1}", f64::from(l) / 30.0),
+            _ => String::new(),
+        };
+        rows.push(("Profil", format!("{profile}{level}")));
+    }
+    rows.push((
+        "Auflösung",
+        format!("{} × {}", decoder.width(), decoder.height()),
+    ));
+    let order = par.field_order as i32;
+    // Wert wird in der Anzeige aus Container-Angabe und Bild zusammengesetzt.
+    rows.push(("Bildfolge", String::new()));
+    let bits = if par.bits_per_raw_sample > 0 {
+        format!(" · {} Bit", par.bits_per_raw_sample)
+    } else {
+        String::new()
+    };
+    rows.push((
+        "Pixelformat",
+        format!("{}{bits}", format!("{:?}", decoder.format()).to_lowercase()),
+    ));
+    let space = match par.color_space as i32 {
+        1 => "BT.709",
+        5 | 6 => "BT.601",
+        9 | 10 => "BT.2020",
+        _ => "nicht angegeben",
+    };
+    let range = match par.color_range as i32 {
+        1 => "Limited (16–235)",
+        2 => "Full (0–255)",
+        _ => "Range nicht angegeben",
+    };
+    let transfer = match par.color_trc as i32 {
+        16 => " · HDR PQ",
+        18 => " · HDR HLG",
+        _ => "",
+    };
+    rows.push(("Farbe", format!("{space} · {range}{transfer}")));
+    let rate = if par.bit_rate > 0 {
+        Some((par.bit_rate, ""))
+    } else if input.bit_rate() > 0 {
+        Some((input.bit_rate(), "≈ "))
+    } else {
+        None
+    };
+    if let Some((bps, approx)) = rate {
+        rows.push((
+            "Datenrate",
+            format!("{approx}{:.2} Mbit/s", bps as f64 / 1e6),
+        ));
+    }
+    if let Some(audio) = input.streams().best(Type::Audio) {
+        // SAFETY: wie oben.
+        let ap = unsafe { &*audio.parameters().as_ptr() };
+        let name = ffmpeg::codec::Id::from(ap.codec_id).name().to_string();
+        let kbps = if ap.bit_rate > 0 {
+            format!(" · {} kbit/s", ap.bit_rate / 1000)
+        } else {
+            String::new()
+        };
+        rows.push((
+            "Audio",
+            format!(
+                "{name} · {} · {} Hz{kbps}",
+                match ap.ch_layout.nb_channels {
+                    1 => "Mono".to_string(),
+                    2 => "Stereo".to_string(),
+                    n => format!("{n} Kanäle"),
+                },
+                ap.sample_rate
+            ),
+        ));
+    }
+    (order, rows)
+}
+
 impl Source {
     fn open(path: &Path) -> Result<(Self, VideoInfo)> {
         let input = format::input(path)
@@ -159,12 +283,16 @@ impl Source {
         } else {
             0.0
         };
+        let codec = decoder.id().name().to_string();
+        let (field_order, details) = describe(&input, &stream, &decoder, &codec);
         let info = VideoInfo {
             width,
             height,
             fps,
             duration,
-            codec: decoder.id().name().to_string(),
+            codec,
+            field_order,
+            details,
         };
         let src = Self {
             input,
@@ -180,6 +308,12 @@ impl Source {
             last_pts: 0.0,
         };
         Ok((src, info))
+    }
+
+    fn is_interlaced(&self) -> bool {
+        // SAFETY: `decoded` ist ein gültiger, vom Decoder befüllter AVFrame.
+        let flags = unsafe { (*self.decoded.as_ptr()).flags };
+        flags & ffmpeg::ffi::AV_FRAME_FLAG_INTERLACED != 0
     }
 
     fn seek(&mut self, time: f64) -> Result<()> {
@@ -334,6 +468,7 @@ fn run(
             serial: st.serial,
             pts,
             key,
+            interlaced: src.is_interlaced(),
             width,
             height,
             rgba,

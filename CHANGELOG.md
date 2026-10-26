@@ -5,6 +5,16 @@ Alle nennenswerten Änderungen an FrameScope. Das Format folgt
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-26
+
+### Hinzugefügt
+- **Codec-Informationen** (Taste `D` oder Info-Button): Container, Codec, Profil/Level, Auflösung, Bildfolge, Pixelformat, Farbraum, Datenrate und Tonspur; im Vergleich für A und B nebeneinander.
+- **Bildrate mit p/i** in der Steuerleiste („25 fps · p“); interlaced wird aus der Container-Angabe oder der Frame-Markierung erkannt.
+
+### Geändert
+- Die Dateinamen-Marken im Vergleich (A/B) werden zusammen mit den Bedienelementen ausgeblendet.
+- Safe-Area-Beschriftungen liegen gestaffelt untereinander und überdecken sich nicht mehr.
+
 ## [0.6.0] - 2026-10-25
 
 ### Hinzugefügt
